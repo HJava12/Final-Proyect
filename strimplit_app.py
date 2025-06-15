@@ -47,7 +47,8 @@ st.markdown(
 # Semilla aleatoria
 tf.random.set_seed(42)
 
-# Configuración\cfg = {
+# Configuración
+cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": 300,
