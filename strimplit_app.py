@@ -207,7 +207,7 @@ def dataset_visualization(df_bal):
 
 # Navegación
 st.sidebar.title("Navigation")
-stapp_mode = st.sidebar.radio("Go to", [
+app_mode = st.sidebar.radio("Go to", [
     "Train Simple RNN",
     "Train LSTM",
     "Train BiLSTM",
