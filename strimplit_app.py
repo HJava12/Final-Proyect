@@ -277,7 +277,7 @@ elif app_mode == "Inference":
             st.error(f"Missing weights for {name}")
     for name, m in models.items():
         txt = st.text_area(f"Enter text for {name}", key=f"txt_{name}")
-        if st.button(f"Predict {name}", key=f"btn_{name}") and txt:(f"Predict {name}", key=name):
+        if st.button(f"Predict {name}", key=f"btn_{name}") and txt:
             X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
             p = m.predict(X)[0]
             st.write(f"Class: {np.argmax(p)}, Conf: {p}")
