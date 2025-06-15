@@ -1,5 +1,5 @@
-
-
+import os
+import requests
 import tensorflow as tf
 import streamlit as st
 import numpy as np
@@ -21,6 +21,42 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Embedding, Bidirectional, LSTM, SimpleRNN, Dense
 from tensorflow.keras.utils import to_categorical
 import glob
+
+# ——————————————
+# Google Drive download helpers
+# ——————————————
+
+def get_confirm_token(response):
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            return value
+    return None
+
+def save_response_content(response, destination, chunk_size=32768):
+    with open(destination, "wb") as f:
+        for chunk in response.iter_content(chunk_size):
+            if chunk:
+                f.write(chunk)
+
+@st.cache_data
+def download_file_from_google_drive(file_id, destination):
+    URL = "https://docs.google.com/uc?export=download"
+    session = requests.Session()
+    response = session.get(URL, params={'id': file_id}, stream=True)
+    token = get_confirm_token(response)
+    if token:
+        response = session.get(URL, params={'id': file_id, 'confirm': token}, stream=True)
+    save_response_content(response, destination)
+    return destination
+
+@st.cache_data
+def ensure_glove(path="glove.6B.300d.txt", file_id="13UFJlS1cxKj6jkcP92gnjOe-YsIHrlYv"):
+    if not os.path.exists(path):
+        download_file_from_google_drive(file_id, path)
+    return path
+
+# Download GloVe embeddings at startup (cached)
+glove_path = ensure_glove()
 
 st.markdown(
     """
@@ -47,7 +83,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # Set random seed
 tf.random.set_seed(42)
 
@@ -56,7 +91,7 @@ cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": 300,
-    "glove_path": "glove.6B.300d.txt",
+    "glove_path": glove_path,
     "bilstm_weights": "model_weights.weights.h5",      # DO NOT CHANGE
     "lstm_weights": "lstm_model_weights.weights.h5",
     "rnn_weights":  "rnn_model_weights.weights.h5"
@@ -83,7 +118,6 @@ def get_tok_emb(max_features, maxlen, emb_dim, glove_path, **kwargs):
             M[i] = emb_index[w]
     return tok, M
 
-
 def split_data(df):
     df_train, df_val = train_test_split(
         df, test_size=0.2, stratify=df.label, random_state=42
@@ -92,7 +126,6 @@ def split_data(df):
     min_ = df_train[df_train.label == 1]
     min_up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
     return pd.concat([maj, min_up]).sample(frac=1, random_state=42), df_val
-
 
 def build_rnn(cfg, embedding_matrix, units=64, dropout=0.2):
     model = Sequential([
@@ -104,7 +137,6 @@ def build_rnn(cfg, embedding_matrix, units=64, dropout=0.2):
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-
 def build_lstm(cfg, embedding_matrix, units=64, dropout=0.2):
     model = Sequential([
         Input(shape=(cfg["maxlen"],)),
@@ -114,7 +146,6 @@ def build_lstm(cfg, embedding_matrix, units=64, dropout=0.2):
     ])
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
-
 
 def build_bilstm(cfg, embedding_matrix, units=64, dropout=0.2):
     model = Sequential([
@@ -126,13 +157,11 @@ def build_bilstm(cfg, embedding_matrix, units=64, dropout=0.2):
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-
 def prepare(df, tokenizer, maxlen, num_classes=2):
     seqs = tokenizer.texts_to_sequences(df.tweet.astype(str))
     X = pad_sequences(seqs, maxlen=maxlen)
     y = to_categorical(df.label.values, num_classes=num_classes)
     return X, y
-
 
 def dataset_visualization(df_bal):
     df = df_bal.copy()
@@ -406,7 +435,7 @@ else:
         st.dataframe(rep_df)
         cm = confusion_matrix(y_true, y_pred)
         fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges",)
+        sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges")
         st.pyplot(fig)
         df_val["pred"] = y_pred
         st.markdown("**False Positives:**")
