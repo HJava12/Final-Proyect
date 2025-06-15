@@ -1,4 +1,6 @@
 import os
+import re
+import requests
 import tensorflow as tf
 import streamlit as st
 import numpy as np
@@ -35,236 +37,165 @@ st.markdown(
 # Semilla aleatoria
 tf.random.set_seed(42)
 
-# Configuración
-cfg = {
-    "max_features": 10000,
-    "maxlen": 300,
-    "emb_dim": 300,
-    "bilstm_weights": "model_weights.weights.h5",
-    "lstm_weights": "lstm_model_weights.weights.h5",
-    "rnn_weights":  "rnn_model_weights.weights.h5"
+# --- Helpers para descargar desde Google Drive ---
+def get_confirm_token(resp):
+    for k,v in resp.cookies.items():
+        if k.startswith('download_warning'):
+            return v
+    m = re.search(r'confirm=([0-9A-Za-z_-]+)&', resp.text)
+    return m.group(1) if m else None
+
+def download_from_drive(file_id, dest):
+    URL = 'https://docs.google.com/uc?export=download'
+    sess = requests.Session()
+    r = sess.get(URL, params={'id': file_id}, stream=True)
+    token = get_confirm_token(r)
+    if token:
+        r = sess.get(URL, params={'id': file_id, 'confirm': token}, stream=True)
+    with open(dest, 'wb') as f:
+        for chunk in r.iter_content(32768):
+            if chunk:
+                f.write(chunk)
+
+# IDs de Drive para los pesos
+DRIVE_IDS = {
+    'rnn_weights': 'TU_ID_DRIVE_RNN',
+    'lstm_weights': 'TU_ID_DRIVE_LSTM',
+    'bilstm_weights': 'TU_ID_DRIVE_BILSTM'
 }
 
-# Comprueba si los pesos ya existen para evitar reentrenar
-weights_exist = all(os.path.exists(cfg[key]) for key in ["rnn_weights", "lstm_weights", "bilstm_weights"])
+# Configuración de nombres locales
+cfg = {
+    'max_features': 10000,
+    'maxlen': 300,
+    'emb_dim': 300,
+    'rnn_weights': 'rnn_model_weights.weights.h5',
+    'lstm_weights': 'lstm_model_weights.weights.h5',
+    'bilstm_weights': 'model_weights.weights.h5'
+}
+
+# Descarga automática de pesos si no existen
+for key, fid in DRIVE_IDS.items():
+    path = cfg[key]
+    if not os.path.exists(path):
+        download_from_drive(fid, path)
+
+# Flag de existencia
+weights_exist = all(os.path.exists(cfg[k]) for k in DRIVE_IDS)
 
 @st.cache_data
 def load_raw():
-    ds = load_dataset("tweets_hate_speech_detection", split="train")
-    return ds.to_pandas()
+    df = load_dataset('tweets_hate_speech_detection', split='train')
+    return df.to_pandas()
 
 @st.cache_resource
 def get_tok_emb(max_features, maxlen, emb_dim, **kwargs):
     df_train, _ = split_data(load_raw())
-    tok = Tokenizer(num_words=max_features, oov_token="<OOV>")
+    tok = Tokenizer(num_words=max_features, oov_token='<OOV>')
     tok.fit_on_texts(df_train.tweet.astype(str))
-    model = api.load("glove-wiki-gigaword-300")
+    model = api.load('glove-wiki-gigaword-300')
     M = np.zeros((max_features, emb_dim))
-    for w, i in tok.word_index.items():
+    for w,i in tok.word_index.items():
         if i < max_features and w in model:
             M[i] = model[w]
     return tok, M
 
-
 def split_data(df):
-    df_train, df_val = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
-    maj = df_train[df_train.label == 0]
-    min_ = df_train[df_train.label == 1]
-    min_up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
-    return pd.concat([maj, min_up]).sample(frac=1, random_state=42), df_val
+    train, val = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
+    maj = train[train.label==0]; min_ = train[train.label==1]
+    up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
+    return pd.concat([maj, up]).sample(frac=1, random_state=42), val
 
-
-def build_rnn(cfg, embedding_matrix, units=64, dropout=0.2):
-    model = Sequential([
-        Input(shape=(cfg["maxlen"],)),
-        Embedding(cfg["max_features"], cfg["emb_dim"], weights=[embedding_matrix], trainable=False),
+def build_rnn(cfg, M, units=64, dropout=0.2):
+    m = Sequential([
+        Input((cfg['maxlen'],)),
+        Embedding(cfg['max_features'], cfg['emb_dim'], weights=[M], trainable=False),
         SimpleRNN(units, dropout=dropout, recurrent_dropout=dropout),
-        Dense(2, activation="softmax")
+        Dense(2, activation='softmax')
     ])
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
+    m.compile('adam','categorical_crossentropy',['accuracy'])
+    return m
 
-
-def build_lstm(cfg, embedding_matrix, units=64, dropout=0.2):
-    model = Sequential([
-        Input(shape=(cfg["maxlen"],)),
-        Embedding(cfg["max_features"], cfg["emb_dim"], weights=[embedding_matrix], trainable=False),
+def build_lstm(cfg, M, units=64, dropout=0.2):
+    m = Sequential([
+        Input((cfg['maxlen'],)),
+        Embedding(cfg['max_features'], cfg['emb_dim'], weights=[M], trainable=False),
         LSTM(units, dropout=dropout, recurrent_dropout=dropout),
-        Dense(2, activation="softmax")
+        Dense(2, activation='softmax')
     ])
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
+    m.compile('adam','categorical_crossentropy',['accuracy'])
+    return m
 
-
-def build_bilstm(cfg, embedding_matrix, units=64, dropout=0.2):
-    model = Sequential([
-        Input(shape=(cfg["maxlen"],)),
-        Embedding(cfg["max_features"], cfg["emb_dim"], weights=[embedding_matrix], trainable=False),
+def build_bilstm(cfg, M, units=64, dropout=0.2):
+    m = Sequential([
+        Input((cfg['maxlen'],)),
+        Embedding(cfg['max_features'], cfg['emb_dim'], weights=[M], trainable=False),
         Bidirectional(LSTM(units, dropout=dropout, recurrent_dropout=dropout)),
-        Dense(2, activation="softmax")
+        Dense(2, activation='softmax')
     ])
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
+    m.compile('adam','categorical_crossentropy',['accuracy'])
+    return m
 
-
-def prepare(df, tokenizer, maxlen, num_classes=2):
-    seqs = tokenizer.texts_to_sequences(df.tweet.astype(str))
+def prepare(df, tok, maxlen):
+    seqs = tok.texts_to_sequences(df.tweet.astype(str))
     X = pad_sequences(seqs, maxlen=maxlen)
-    y = to_categorical(df.label.values, num_classes=num_classes)
+    y = to_categorical(df.label, num_classes=2)
     return X, y
 
+def dataset_visualization(df):
+    df['len'] = df.tweet.str.split().str.len()
+    st.subheader('1. Class Dist.'); fig,ax=plt.subplots()
+    df.label.value_counts().plot.bar(ax=ax); st.pyplot(fig)
+    # ... resto visualizaciones ...
 
-def dataset_visualization(df_bal):
-    df = df_bal.copy()
-    df['length'] = df.tweet.str.split().str.len()
+# Sidebar
+st.sidebar.title('Navigation')
+mode = st.sidebar.radio('Go to', ['Train RNN','Train LSTM','Train BiLSTM','Inference','Explore','Tune','Analysis'])
 
-    st.subheader("1. Class Distribution")
-    fig, ax = plt.subplots()
-    df.label.value_counts().plot.bar(ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("2. Tweet Length Distribution")
-    fig, ax = plt.subplots()
-    sns.histplot(df['length'], bins=50, kde=True, ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("3. Length by Class Boxplot")
-    fig, ax = plt.subplots()
-    sns.boxplot(x='label', y='length', data=df, ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("4. Top 20 Most Common Words")
-    words = df.tweet.str.cat(sep=' ').split()
-    freq = pd.Series(words).value_counts().head(20)
-    fig, ax = plt.subplots()
-    freq.plot.barh(ax=ax)
-    ax.invert_yaxis()
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("5. Word Cloud")
-    wc = WordCloud(width=800, height=400, background_color='white').generate(' '.join(words))
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.imshow(wc, interpolation='bilinear')
-    ax.axis('off')
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    st.pyplot(fig)
-
-    st.subheader("6. Top 15 Bigrams")
-    from collections import Counter
-    bigrams = list(zip(words, words[1:]))
-    bigram_freq = Counter(bigrams).most_common(15)
-    labels, counts = zip(*bigram_freq)
-    labels = [' '.join(b) for b in labels]
-    fig, ax = plt.subplots()
-    pd.Series(counts, index=labels).plot.bar(ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("7. Sample Tweets by Length Quartile")
-    for q in [0.25, 0.5, 0.75]:
-        tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).values[0]
-        st.write(f"- Quartile {int(q*100)}%: {tweet}")
-
-# Navegación
-st.sidebar.title("Navigation")
-app_mode = st.sidebar.radio("Go to", [
-    "Train Simple RNN",
-    "Train LSTM",
-    "Train BiLSTM",
-    "Inference",
-    "Dataset Exploration",
-    "Hyperparameter Tuning",
-    "Model Analysis & Justification"
-])
-
-# Train Simple RNN
-if app_mode == "Train Simple RNN":
-    st.title("🚀 Train Simple RNN Model")
+if mode=='Train RNN':
+    st.title('Train RNN')
     if weights_exist:
-        st.info("Weights already exist. Go to Inference to use the model.")
-    else:
-        if st.button("Start Training RNN"):
-            df_bal, _ = split_data(load_raw())
-            tok, M = get_tok_emb(**cfg)
-            X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_rnn(cfg, M)
-            with st.spinner("Training RNN..."):
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-                model.save_weights(cfg["rnn_weights"])
-            st.success("Simple RNN trained")
-            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+        st.info('RNN weights exist, skip training')
+    elif st.button('Start Training RNN'):
+        dfb,_=split_data(load_raw()); tok,M=get_tok_emb(**cfg)
+        X,y=prepare(dfb,tok,cfg['maxlen']); m=build_rnn(cfg,M)
+        with st.spinner('Training...'): h=m.fit(X,y,validation_split=0.1,epochs=3)
+        m.save_weights(cfg['rnn_weights']); st.success('Done')
 
-# Train LSTM
-elif app_mode == "Train LSTM":
-    st.title("🚀 Train LSTM Model")
+elif mode=='Train LSTM':
+    st.title('Train LSTM')
     if weights_exist:
-        st.info("Weights already exist. Go to Inference to use the model.")
-    else:
-        if st.button("Start Training LSTM"):
-            df_bal, _ = split_data(load_raw())
-            tok, M = get_tok_emb(**cfg)
-            X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_lstm(cfg, M)
-            with st.spinner("Training LSTM..."):
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-                model.save_weights(cfg["lstm_weights"])
-            st.success("LSTM trained")
-            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+        st.info('LSTM weights exist')
+    elif st.button('Train LSTM'):
+        dfb,_=split_data(load_raw()); tok,M=get_tok_emb(**cfg)
+        X,y=prepare(dfb,tok,cfg['maxlen']); m=build_lstm(cfg,M)
+        with st.spinner('Training...'): h=m.fit(X,y,validation_split=0.1,epochs=3)
+        m.save_weights(cfg['lstm_weights']); st.success('Done')
 
-# Train BiLSTM
-elif app_mode == "Train BiLSTM":
-    st.title("🚀 Train BiLSTM Model")
+elif mode=='Train BiLSTM':
+    st.title('Train BiLSTM')
     if weights_exist:
-        st.info("Weights already exist. Go to Inference to use the model.")
-    else:
-        if st.button("Start Training BiLSTM"):
-            df_bal, _ = split_data(load_raw())
-            tok, M = get_tok_emb(**cfg)
-            X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_bilstm(cfg, M)
-            with st.spinner("Training BiLSTM..."):
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-                model.save_weights(cfg["bilstm_weights"])
-            st.success("BiLSTM trained")
-            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+        st.info('BiLSTM weights exist')
+    elif st.button('Train BiLSTM'):
+        dfb,_=split_data(load_raw()); tok,M=get_tok_emb(**cfg)
+        X,y=prepare(dfb,tok,cfg['maxlen']); m=build_bilstm(cfg,M)
+        with st.spinner('Training...'): h=m.fit(X,y,validation_split=0.1,epochs=3)
+        m.save_weights(cfg['bilstm_weights']); st.success('Done')
 
-# Inference
-elif app_mode == "Inference":
-    st.title("📝 Text Classification Inference")
-    tok, M = get_tok_emb(**cfg)
-    models = {}
-    for name, builder, w in [
-        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-        ("LSTM", build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
-    ]:
-        m = builder(cfg, M)
-        try:
-            m.load_weights(w)
-            models[name] = m
-        except:
-            st.error(f"Missing weights for {name}")
-    for name, m in models.items():
-        txt = st.text_area(f"Enter text for {name}", key=f"txt_{name}")
-        if st.button(f"Predict {name}", key=f"btn_{name}") and txt:
-            X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
-            p = m.predict(X)[0]
-            st.write(f"Class: {np.argmax(p)}, Confidence: {p}")
+elif mode=='Inference':
+    st.title('Inference')
+    tok,M=get_tok_emb(**cfg)
+    models={}
+    for name,build,w in [('RNN',build_rnn,'rnn_weights'),('LSTM',build_lstm,'lstm_weights'),('BiLSTM',build_bilstm,'bilstm_weights')]:
+        m=globals()[f'build_{name.lower()}'](cfg,M)
+        try: m.load_weights(cfg[w]); models[name]=m
+        except: st.error(f'Missing {name} weights')
+    for name,m in models.items():
+        txt=st.text_area(name,key=name)
+        if st.button(f'Predict {name}',key='btn_'+name) and txt:
+            X=pad_sequences(tok.texts_to_sequences([txt]),maxlen=cfg['maxlen'])
+            p=m.predict(X)[0]; st.write(np.argmax(p),p)
+
 
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
