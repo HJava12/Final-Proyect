@@ -23,17 +23,13 @@ from tensorflow.keras.layers import Input, Embedding, Bidirectional, LSTM, Simpl
 from tensorflow.keras.utils import to_categorical
 import glob
 
-# —————————————————————————————————————————————————————
-# Google Drive download helpers with HTML fallback for confirm token
-# —————————————————————————————————————————————————————
-
 def get_confirm_token(response):
-    # first, try cookies
+    # primero cookies
     for key, value in response.cookies.items():
         if key.startswith('download_warning'):
             return value
-    # fallback: search the HTML for confirm token
-    m = re.search(r'href=".*?confirm=([0-9A-Za-z_]+)&', response.text)
+    # fallback: busca confirm=TOKEN& en el HTML
+    m = re.search(r"confirm=([0-9A-Za-z_-]+)&", response.text)
     if m:
         return m.group(1)
     return None
@@ -48,11 +44,9 @@ def save_response_content(response, destination, chunk_size=32768):
 def download_file_from_google_drive(file_id, destination):
     URL = "https://docs.google.com/uc?export=download"
     session = requests.Session()
-    # initial request
     response = session.get(URL, params={'id': file_id}, stream=True)
     token = get_confirm_token(response)
     if token:
-        # re-request with confirm token
         response = session.get(URL, params={'id': file_id, 'confirm': token}, stream=True)
     save_response_content(response, destination)
     return destination
@@ -60,12 +54,12 @@ def download_file_from_google_drive(file_id, destination):
 @st.cache_data
 def ensure_glove(path="glove.6B.300d.txt", file_id="13UFJlS1cxKj6jkcP92gnjOe-YsIHrlYv"):
     if not os.path.exists(path):
-        # download the file from Drive into path
         download_file_from_google_drive(file_id, path)
     return path
 
-# download (cached) before anything else
+# descarga inicial (cached)
 glove_path = ensure_glove()
+
 
 st.markdown(
     """
@@ -361,8 +355,8 @@ elif app_mode == "Inference":
     models = {}
     for name, builder, wpath in [
         ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-        ("LSTM", build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+        ("LSTM",      build_lstm, cfg["lstm_weights"]),
+        ("BiLSTM",   build_bilstm, cfg["bilstm_weights"]),
     ]:
         m = builder(cfg, M)
         try:
@@ -377,7 +371,7 @@ elif app_mode == "Inference":
             X = pad_sequences(tokenizer.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
             probs = model.predict(X)[0]
             st.write(f"Class: {np.argmax(probs)}, Confidence: {probs}")
-
+            
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
     st.title("📊 In-depth Dataset Exploration")
