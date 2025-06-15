@@ -116,16 +116,28 @@ def get_tok_emb(max_features, maxlen, emb_dim, glove_path, **kwargs):
     df_train, _ = split_data(load_raw())
     tok = Tokenizer(num_words=max_features, oov_token="<OOV>")
     tok.fit_on_texts(df_train.tweet.astype(str))
+
     emb_index = {}
     with open(glove_path, encoding="utf8") as f:
         for line in f:
-            w, *v = line.split()
-            emb_index[w] = np.asarray(v, dtype="float32")
-    M = np.zeros((max_features, emb_dim))
+            parts = line.strip().split()
+            # debe haber exactamente emb_dim + 1 elementos
+            if len(parts) != emb_dim + 1:
+                continue
+            word, *vector = parts
+            try:
+                emb_index[word] = np.asarray(vector, dtype="float32")
+            except ValueError:
+                # si alguna parte no es numérica, la saltamos
+                continue
+
+    # construye la matriz de embeddings
+    M = np.zeros((max_features, emb_dim), dtype="float32")
     for w, i in tok.word_index.items():
         if i < max_features and w in emb_index:
             M[i] = emb_index[w]
     return tok, M
+
 
 def split_data(df):
     df_train, df_val = train_test_split(
