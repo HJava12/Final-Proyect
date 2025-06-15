@@ -1,14 +1,9 @@
-import os
-import re
-import requests
 import tensorflow as tf
 import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 import seaborn as sns
-from cycler import cycler
 import optuna
 import optuna.visualization as vis
 from wordcloud import WordCloud
@@ -21,46 +16,9 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Embedding, Bidirectional, LSTM, SimpleRNN, Dense
 from tensorflow.keras.utils import to_categorical
-import glob
+import gensim.downloader as api
 
-def get_confirm_token(response):
-    # primero cookies
-    for key, value in response.cookies.items():
-        if key.startswith('download_warning'):
-            return value
-    # fallback: busca confirm=TOKEN& en el HTML
-    m = re.search(r"confirm=([0-9A-Za-z_-]+)&", response.text)
-    if m:
-        return m.group(1)
-    return None
-
-def save_response_content(response, destination, chunk_size=32768):
-    with open(destination, "wb") as f:
-        for chunk in response.iter_content(chunk_size):
-            if chunk:
-                f.write(chunk)
-
-@st.cache_data
-def download_file_from_google_drive(file_id, destination):
-    URL = "https://docs.google.com/uc?export=download"
-    session = requests.Session()
-    response = session.get(URL, params={'id': file_id}, stream=True)
-    token = get_confirm_token(response)
-    if token:
-        response = session.get(URL, params={'id': file_id, 'confirm': token}, stream=True)
-    save_response_content(response, destination)
-    return destination
-
-@st.cache_data
-def ensure_glove(path="glove.6B.300d.txt", file_id="13UFJlS1cxKj6jkcP92gnjOe-YsIHrlYv"):
-    if not os.path.exists(path):
-        download_file_from_google_drive(file_id, path)
-    return path
-
-# descarga inicial (cached)
-glove_path = ensure_glove()
-
-
+# --- Estilos CSS ---
 st.markdown(
     """
     <style>
@@ -69,7 +27,7 @@ st.markdown(
       background-color: #000702;
     }
     /* Sidebar */
-    [data-testid="stSidebar"] > div:first-child {
+    [data-testid=\"stSidebar\"] > div:first-child {
       background-color: #1f2c13;
     }
     /* Títulos y textos */
@@ -86,16 +44,14 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Set random seed
+# Semilla aleatoria
 tf.random.set_seed(42)
 
-# Configuration
-cfg = {
+# Configuración\cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": 300,
-    "glove_path": glove_path,
-    "bilstm_weights": "model_weights.weights.h5",      # DO NOT CHANGE
+    "bilstm_weights": "model_weights.weights.h5",
     "lstm_weights": "lstm_model_weights.weights.h5",
     "rnn_weights":  "rnn_model_weights.weights.h5"
 }
@@ -106,20 +62,17 @@ def load_raw():
     return ds.to_pandas()
 
 @st.cache_resource
-def get_tok_emb(max_features, maxlen, emb_dim, glove_path, **kwargs):
+def get_tok_emb(max_features, maxlen, emb_dim, **kwargs):
     df_train, _ = split_data(load_raw())
     tok = Tokenizer(num_words=max_features, oov_token="<OOV>")
     tok.fit_on_texts(df_train.tweet.astype(str))
-    emb_index = {}
-    with open(glove_path, encoding="utf8") as f:
-        for line in f:
-            w, *v = line.split()
-            emb_index[w] = np.asarray(v, dtype="float32")
+    model = api.load("glove-wiki-gigaword-300")
     M = np.zeros((max_features, emb_dim))
     for w, i in tok.word_index.items():
-        if i < max_features and w in emb_index:
-            M[i] = emb_index[w]
+        if i < max_features and w in model:
+            M[i] = model[w]
     return tok, M
+
 
 def split_data(df):
     df_train, df_val = train_test_split(
@@ -129,6 +82,7 @@ def split_data(df):
     min_ = df_train[df_train.label == 1]
     min_up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
     return pd.concat([maj, min_up]).sample(frac=1, random_state=42), df_val
+
 
 def build_rnn(cfg, embedding_matrix, units=64, dropout=0.2):
     model = Sequential([
@@ -140,6 +94,7 @@ def build_rnn(cfg, embedding_matrix, units=64, dropout=0.2):
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
+
 def build_lstm(cfg, embedding_matrix, units=64, dropout=0.2):
     model = Sequential([
         Input(shape=(cfg["maxlen"],)),
@@ -149,6 +104,7 @@ def build_lstm(cfg, embedding_matrix, units=64, dropout=0.2):
     ])
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
+
 
 def build_bilstm(cfg, embedding_matrix, units=64, dropout=0.2):
     model = Sequential([
@@ -160,16 +116,19 @@ def build_bilstm(cfg, embedding_matrix, units=64, dropout=0.2):
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
+
 def prepare(df, tokenizer, maxlen, num_classes=2):
     seqs = tokenizer.texts_to_sequences(df.tweet.astype(str))
     X = pad_sequences(seqs, maxlen=maxlen)
     y = to_categorical(df.label.values, num_classes=num_classes)
     return X, y
 
+
 def dataset_visualization(df_bal):
     df = df_bal.copy()
     df['length'] = df.tweet.str.split().str.len()
 
+    # 1. Class Distribution
     st.subheader("1. Class Distribution")
     fig, ax = plt.subplots()
     df.label.value_counts().plot.bar(ax=ax)
@@ -178,125 +137,76 @@ def dataset_visualization(df_bal):
     axes_color = '#5d612e'
     ax.spines['bottom'].set_color(axes_color)
     ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
     ax.set_xlabel('Class', color='white')
     ax.set_ylabel('Count', color='white')
     ax.tick_params(colors='white')
-    for spine in ax.spines.values():
-        spine.set_color('white')
     st.pyplot(fig)
 
+    # 2. Tweet Length Distribution
     st.subheader("2. Tweet Length Distribution")
     fig, ax = plt.subplots()
     sns.histplot(df['length'], bins=50, kde=True, ax=ax)
-    ax.set_xlabel('Tweet Length')
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
+    ax.set_xlabel('Length', color='white')
     ax.tick_params(colors='white')
-    for spine in ax.spines.values():
-        spine.set_color('white')
     st.pyplot(fig)
 
+    # 3. Boxplot Length by Class
     st.subheader("3. Length by Class Boxplot")
     fig, ax = plt.subplots()
     sns.boxplot(x='label', y='length', data=df, ax=ax)
-    ax.set_xlabel('Class')
-    ax.set_ylabel('Length')
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
     ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
+    ax.set_ylabel('Length', color='white')
     ax.tick_params(colors='white')
-    for spine in ax.spines.values():
-        spine.set_color('white')
     st.pyplot(fig)
 
+    # 4. Top 20 Words
     st.subheader("4. Top 20 Most Common Words")
     words = df.tweet.str.cat(sep=' ').split()
     freq = pd.Series(words).value_counts().head(20)
     fig, ax = plt.subplots()
     freq.plot.barh(ax=ax)
     ax.invert_yaxis()
-    ax.set_xlabel('Frequency')
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
     ax.tick_params(colors='white')
-    for spine in ax.spines.values():
-        spine.set_color('white')
     st.pyplot(fig)
 
+    # 5. Word Cloud
     st.subheader("5. Word Cloud")
-    corpus = df.tweet.str.cat(sep=' ')
-    wc = WordCloud(width=800, height=400, background_color='white').generate(corpus)
-    fig, ax = plt.subplots(figsize=(10,5))
+    wc = WordCloud(width=800, height=400, background_color='white').generate(' '.join(words))
+    fig, ax = plt.subplots(figsize=(10, 5))
     ax.imshow(wc, interpolation='bilinear')
     ax.axis('off')
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
-    ax.tick_params(colors='white')
-    for spine in ax.spines.values():
-        spine.set_color('white')
     st.pyplot(fig)
 
-    st.subheader("6. Top 15 Bigrams")
+    # 6. Top 15 Bigrams
     from collections import Counter
-    bigrams = zip(words, words[1:])
+    bigrams = list(zip(words, words[1:]))
     bigram_freq = Counter(bigrams).most_common(15)
     labels, counts = zip(*bigram_freq)
     labels = [' '.join(b) for b in labels]
     fig, ax = plt.subplots()
     pd.Series(counts, index=labels).plot.bar(ax=ax)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
     ax.tick_params(colors='white')
-    for spine in ax.spines.values():
-        spine.set_color('white')
     st.pyplot(fig)
 
+    # 7. Sample Tweets by Quartile
     st.subheader("7. Sample Tweets by Length Quartile")
-    quartiles = df['length'].quantile([0.25, 0.5, 0.75])
-    for i, q in enumerate(quartiles, start=1):
-        tweet = df[df['length'] <= q].tweet.sample(1).values[0]
-        st.write(f"- Quartile {i} (<= {int(q)} words): {tweet}")
+    for q in [0.25, 0.5, 0.75]:
+        tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).values[0]
+        st.write(f"- Quartile {int(q*100)}%: {tweet}")
 
-# Sidebar & Navigation
+# Navegación
 st.sidebar.title("Navigation")
-app_mode = st.sidebar.radio("Go to", [
+stapp_mode = st.sidebar.radio("Go to", [
     "Train Simple RNN",
     "Train LSTM",
     "Train BiLSTM",
@@ -306,94 +216,92 @@ app_mode = st.sidebar.radio("Go to", [
     "Model Analysis & Justification"
 ])
 
-# Train Simple RNN
+# Entrenamiento Simple RNN
 if app_mode == "Train Simple RNN":
-    st.title("🚀 Train the Simple RNN Model")
+    st.title("🚀 Train Simple RNN Model")
     if st.button("Start Training RNN"):
-        df_train_bal, _ = split_data(load_raw())
-        tokenizer, M = get_tok_emb(**cfg)
-        X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
+        df_bal, _ = split_data(load_raw())
+        tok, M = get_tok_emb(**cfg)
+        X, y = prepare(df_bal, tok, cfg["maxlen"])
         model = build_rnn(cfg, M)
-        with st.spinner("Training Simple RNN..."):
-            history = model.fit(X_train, y_train, validation_split=0.1, epochs=3, batch_size=128)
+        with st.spinner("Training RNN..."):
+            h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
             model.save_weights(cfg["rnn_weights"])
-        st.success("Simple RNN trained and saved")
-        st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+        st.success("Simple RNN trained")
+        st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
-# Train LSTM
+# Entrenamiento LSTM
 elif app_mode == "Train LSTM":
-    st.title("🚀 Train the LSTM Model")
+    st.title("🚀 Train LSTM Model")
     if st.button("Start Training LSTM"):
-        df_train_bal, _ = split_data(load_raw())
-        tokenizer, M = get_tok_emb(**cfg)
-        X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
+        df_bal, _ = split_data(load_raw())
+        tok, M = get_tok_emb(**cfg)
+        X, y = prepare(df_bal, tok, cfg["maxlen"])
         model = build_lstm(cfg, M)
         with st.spinner("Training LSTM..."):
-            history = model.fit(X_train, y_train, validation_split=0.1, epochs=3, batch_size=128)
+            h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
             model.save_weights(cfg["lstm_weights"])
-        st.success("LSTM trained and saved")
-        st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+        st.success("LSTM trained")
+        st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
-# Train BiLSTM
+# Entrenamiento BiLSTM
 elif app_mode == "Train BiLSTM":
-    st.title("🚀 Train the BiLSTM Model")
+    st.title("🚀 Train BiLSTM Model")
     if st.button("Start Training BiLSTM"):
-        df_train_bal, _ = split_data(load_raw())
-        tokenizer, M = get_tok_emb(**cfg)
-        X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
+        df_bal, _ = split_data(load_raw())
+        tok, M = get_tok_emb(**cfg)
+        X, y = prepare(df_bal, tok, cfg["maxlen"])
         model = build_bilstm(cfg, M)
         with st.spinner("Training BiLSTM..."):
-            history = model.fit(X_train, y_train, validation_split=0.1, epochs=3, batch_size=128)
+            h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
             model.save_weights(cfg["bilstm_weights"])
-        st.success("BiLSTM trained and saved")
-        st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+        st.success("BiLSTM trained")
+        st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
 # Inference
 elif app_mode == "Inference":
     st.title("📝 Text Classification Inference")
-    tokenizer, M = get_tok_emb(**cfg)
+    tok, M = get_tok_emb(**cfg)
     models = {}
-    for name, builder, wpath in [
+    for name, builder, w in [
         ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-        ("LSTM",      build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM",   build_bilstm, cfg["bilstm_weights"]),
+        ("LSTM", build_lstm, cfg["lstm_weights"]),
+        ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
     ]:
         m = builder(cfg, M)
         try:
-            m.load_weights(wpath)
+            m.load_weights(w)
             models[name] = m
         except:
-            st.error(f"Missing weights for {name}. Please train first.")
-    for name, model in models.items():
-        st.subheader(f"{name} Model")
-        txt = st.text_area(f"Enter text for {name}:", key=name)
-        if st.button(f"Predict with {name}", key=f"btn_{name}") and txt:
-            X = pad_sequences(tokenizer.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
-            probs = model.predict(X)[0]
-            st.write(f"Class: {np.argmax(probs)}, Confidence: {probs}")
-            
-# Dataset Exploration
+            st.error(f"Missing weights for {name}")
+    for name, m in models.items():
+        txt = st.text_area(f"Enter text for {name}", key=name)
+        if st.button(f"Predict {name}", key=name):
+            X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
+            p = m.predict(X)[0]
+            st.write(f"Class: {np.argmax(p)}, Conf: {p}")
+
+# Exploración
 elif app_mode == "Dataset Exploration":
-    st.title("📊 In-depth Dataset Exploration")
+    st.title("📊 Dataset Exploration")
     df_bal, _ = split_data(load_raw())
     dataset_visualization(df_bal)
 
-# Hyperparameter Tuning
+# Tuning
 elif app_mode == "Hyperparameter Tuning":
-    st.title("🔧 Hyperparameter Tuning (BiLSTM Only)")
-    tokenizer, M = get_tok_emb(**cfg)
+    st.title("🔧 Hyperparameter Tuning")
+    tok, M = get_tok_emb(**cfg)
     if st.button("Run Tuning"):
-        study = optuna.create_study(direction="maximize", storage="sqlite:///optuna.db", load_if_exists=True)
-        @st.spinner("Tuning in progress...")
-        def run():
-            def objective(trial):
-                u = trial.suggest_int("lstm_units", 32, 128)
-                d = trial.suggest_float("dropout_rate", 0.1, 0.5)
-                model = build_bilstm(cfg, M, units=u, dropout=d)
-                df_bal, _ = split_data(load_raw())
-                X, y = prepare(df_bal, tokenizer, cfg["maxlen"])
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128, verbose=0)
-                return h.history["val_accuracy"][-1]
+        study = optuna.create_study(direction="maximize")
+        @st.spinner("Tuning...")
+        def obj(trial):
+            u = trial.suggest_int("units", 32, 128)
+            d = trial.suggest_float("dropout", 0.1, 0.5)
+            mdl = build_bilstm(cfg, M, units=u, dropout=d)
+            df_bal, _ = split_data(load_raw())
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            h = mdl.fit(X, y, validation_split=0.1, epochs=3, batch_size=128, verbose=0)
+            return h.history["val_accuracy"][-1]
             study.optimize(objective, n_trials=5)
             return study
         study = run()
