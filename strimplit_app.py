@@ -1,3 +1,4 @@
+import os
 import tensorflow as tf
 import streamlit as st
 import numpy as np
@@ -22,23 +23,10 @@ import gensim.downloader as api
 st.markdown(
     """
     <style>
-    /* Fondo general de la app */
-    .stApp {
-      background-color: #000702;
-    }
-    /* Sidebar */
-    [data-testid=\"stSidebar\"] > div:first-child {
-      background-color: #1f2c13;
-    }
-    /* Títulos y textos */
-    .css-1v0mbdj, .css-1d391kg {
-      color: #d4903b !important;
-    }
-    /* Botones */
-    button {
-      background-color: #a94802 !important;
-      color: #ffffff !important;
-    }
+    .stApp { background-color: #000702; }
+    [data-testid=\"stSidebar\"] > div:first-child { background-color: #1f2c13; }
+    .css-1v0mbdj, .css-1d391kg { color: #d4903b !important; }
+    button { background-color: #a94802 !important; color: #ffffff !important; }
     </style>
     """,
     unsafe_allow_html=True
@@ -56,6 +44,9 @@ cfg = {
     "lstm_weights": "lstm_model_weights.weights.h5",
     "rnn_weights":  "rnn_model_weights.weights.h5"
 }
+
+# Comprueba si los pesos ya existen para evitar reentrenar
+weights_exist = all(os.path.exists(cfg[key]) for key in ["rnn_weights", "lstm_weights", "bilstm_weights"])
 
 @st.cache_data
 def load_raw():
@@ -76,9 +67,7 @@ def get_tok_emb(max_features, maxlen, emb_dim, **kwargs):
 
 
 def split_data(df):
-    df_train, df_val = train_test_split(
-        df, test_size=0.2, stratify=df.label, random_state=42
-    )
+    df_train, df_val = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
     maj = df_train[df_train.label == 0]
     min_ = df_train[df_train.label == 1]
     min_up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
@@ -129,42 +118,30 @@ def dataset_visualization(df_bal):
     df = df_bal.copy()
     df['length'] = df.tweet.str.split().str.len()
 
-    # 1. Class Distribution
     st.subheader("1. Class Distribution")
     fig, ax = plt.subplots()
     df.label.value_counts().plot.bar(ax=ax)
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
     ax.tick_params(colors='white')
     st.pyplot(fig)
 
-    # 2. Tweet Length Distribution
     st.subheader("2. Tweet Length Distribution")
     fig, ax = plt.subplots()
     sns.histplot(df['length'], bins=50, kde=True, ax=ax)
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    ax.set_xlabel('Length', color='white')
     ax.tick_params(colors='white')
     st.pyplot(fig)
 
-    # 3. Boxplot Length by Class
     st.subheader("3. Length by Class Boxplot")
     fig, ax = plt.subplots()
     sns.boxplot(x='label', y='length', data=df, ax=ax)
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Length', color='white')
     ax.tick_params(colors='white')
     st.pyplot(fig)
 
-    # 4. Top 20 Words
     st.subheader("4. Top 20 Most Common Words")
     words = df.tweet.str.cat(sep=' ').split()
     freq = pd.Series(words).value_counts().head(20)
@@ -176,7 +153,6 @@ def dataset_visualization(df_bal):
     ax.tick_params(colors='white')
     st.pyplot(fig)
 
-    # 5. Word Cloud
     st.subheader("5. Word Cloud")
     wc = WordCloud(width=800, height=400, background_color='white').generate(' '.join(words))
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -186,7 +162,7 @@ def dataset_visualization(df_bal):
     ax.set_facecolor('#3d3e36')
     st.pyplot(fig)
 
-    # 6. Top 15 Bigrams
+    st.subheader("6. Top 15 Bigrams")
     from collections import Counter
     bigrams = list(zip(words, words[1:]))
     bigram_freq = Counter(bigrams).most_common(15)
@@ -199,7 +175,6 @@ def dataset_visualization(df_bal):
     ax.tick_params(colors='white')
     st.pyplot(fig)
 
-    # 7. Sample Tweets by Quartile
     st.subheader("7. Sample Tweets by Length Quartile")
     for q in [0.25, 0.5, 0.75]:
         tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).values[0]
@@ -217,47 +192,56 @@ app_mode = st.sidebar.radio("Go to", [
     "Model Analysis & Justification"
 ])
 
-# Entrenamiento Simple RNN
+# Train Simple RNN
 if app_mode == "Train Simple RNN":
     st.title("🚀 Train Simple RNN Model")
-    if st.button("Start Training RNN"):
-        df_bal, _ = split_data(load_raw())
-        tok, M = get_tok_emb(**cfg)
-        X, y = prepare(df_bal, tok, cfg["maxlen"])
-        model = build_rnn(cfg, M)
-        with st.spinner("Training RNN..."):
-            h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-            model.save_weights(cfg["rnn_weights"])
-        st.success("Simple RNN trained")
-        st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+    if weights_exist:
+        st.info("Weights already exist. Go to Inference to use the model.")
+    else:
+        if st.button("Start Training RNN"):
+            df_bal, _ = split_data(load_raw())
+            tok, M = get_tok_emb(**cfg)
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            model = build_rnn(cfg, M)
+            with st.spinner("Training RNN..."):
+                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
+                model.save_weights(cfg["rnn_weights"])
+            st.success("Simple RNN trained")
+            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
-# Entrenamiento LSTM
+# Train LSTM
 elif app_mode == "Train LSTM":
     st.title("🚀 Train LSTM Model")
-    if st.button("Start Training LSTM"):
-        df_bal, _ = split_data(load_raw())
-        tok, M = get_tok_emb(**cfg)
-        X, y = prepare(df_bal, tok, cfg["maxlen"])
-        model = build_lstm(cfg, M)
-        with st.spinner("Training LSTM..."):
-            h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-            model.save_weights(cfg["lstm_weights"])
-        st.success("LSTM trained")
-        st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+    if weights_exist:
+        st.info("Weights already exist. Go to Inference to use the model.")
+    else:
+        if st.button("Start Training LSTM"):
+            df_bal, _ = split_data(load_raw())
+            tok, M = get_tok_emb(**cfg)
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            model = build_lstm(cfg, M)
+            with st.spinner("Training LSTM..."):
+                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
+                model.save_weights(cfg["lstm_weights"])
+            st.success("LSTM trained")
+            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
-# Entrenamiento BiLSTM
+# Train BiLSTM
 elif app_mode == "Train BiLSTM":
     st.title("🚀 Train BiLSTM Model")
-    if st.button("Start Training BiLSTM"):
-        df_bal, _ = split_data(load_raw())
-        tok, M = get_tok_emb(**cfg)
-        X, y = prepare(df_bal, tok, cfg["maxlen"])
-        model = build_bilstm(cfg, M)
-        with st.spinner("Training BiLSTM..."):
-            h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-            model.save_weights(cfg["bilstm_weights"])
-        st.success("BiLSTM trained")
-        st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+    if weights_exist:
+        st.info("Weights already exist. Go to Inference to use the model.")
+    else:
+        if st.button("Start Training BiLSTM"):
+            df_bal, _ = split_data(load_raw())
+            tok, M = get_tok_emb(**cfg)
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            model = build_bilstm(cfg, M)
+            with st.spinner("Training BiLSTM..."):
+                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
+                model.save_weights(cfg["bilstm_weights"])
+            st.success("BiLSTM trained")
+            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
 # Inference
 elif app_mode == "Inference":
@@ -280,9 +264,9 @@ elif app_mode == "Inference":
         if st.button(f"Predict {name}", key=f"btn_{name}") and txt:
             X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
             p = m.predict(X)[0]
-            st.write(f"Class: {np.argmax(p)}, Conf: {p}")
+            st.write(f"Class: {np.argmax(p)}, Confidence: {p}")
 
-# Exploración
+# Dataset Exploration
 elif app_mode == "Dataset Exploration":
     st.title("📊 Dataset Exploration")
     df_bal, _ = split_data(load_raw())
