@@ -195,6 +195,8 @@ if app_mode.startswith("Train"):
             with st.spinner(f"Training {name}..."):
                 try:
                     h = model.fit( X, y, validation_split=0.1, epochs=1, batch_size=32 )
+                    model.save_weights(wpath)
+                    weights_exist[name] = True
                 except Exception as e:
                     st.error(f"Training failed for {name}: {e}")
                     return
