@@ -30,11 +30,10 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
 # Semilla aleatoria
 tf.random.set_seed(42)
 
-# Configuración
+# Configuración de rutas de pesos
 ebdim = 300
 cfg = {
     "max_features": 10000,
@@ -45,10 +44,12 @@ cfg = {
     "bilstm_weights": "model_weights.weights.h5"
 }
 
-# Verifica existencia individual de pesos
-weights_exist_rnn = os.path.exists(cfg["rnn_weights"])
-weights_exist_lstm = os.path.exists(cfg["lstm_weights"])
-weights_exist_bilstm = os.path.exists(cfg["bilstm_weights"])
+# Verificación de existencia de pesos individuales
+weights_exist = {
+    "Simple RNN": os.path.exists(cfg["rnn_weights"]),
+    "LSTM": os.path.exists(cfg["lstm_weights"]),
+    "BiLSTM": os.path.exists(cfg["bilstm_weights"])  
+}
 
 @st.cache_data
 def load_raw():
@@ -110,10 +111,10 @@ def prepare(df, tokenizer, maxlen, num_classes=2):
     y = to_categorical(df.label.values, num_classes=num_classes)
     return X, y
 
+
 def dataset_visualization(df_bal):
     df = df_bal.copy()
     df['length'] = df.tweet.str.split().str.len()
-    # Visualizaciones
     st.subheader("1. Class Distribution")
     fig, ax = plt.subplots()
     df.label.value_counts().plot.bar(ax=ax)
@@ -161,6 +162,7 @@ def dataset_visualization(df_bal):
     for q in [0.25, 0.5, 0.75]:
         tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).iat[0]
         st.write(f"- Quartile {int(q*100)}%: {tweet}")
+
 # Navegación
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Go to", [
@@ -173,84 +175,60 @@ app_mode = st.sidebar.radio("Go to", [
     "Model Analysis & Justification"
 ])
 
-# Train Simple RNN
-if app_mode == "Train Simple RNN":
-    st.title("🚀 Train Simple RNN Model")
-    if weights_exist_rnn:
-        st.info("RNN weights already exist. Go to Inference to use the model.")
+# Entrenamiento de modelos
+if app_mode.startswith("Train"):
+    model_map = {
+        "Train Simple RNN": (build_rnn, cfg["rnn_weights"], "Simple RNN"),
+        "Train LSTM": (build_lstm, cfg["lstm_weights"], "LSTM"),
+        "Train BiLSTM": (build_bilstm, cfg["bilstm_weights"], "BiLSTM")
+    }
+    build_fn, wpath, name = model_map[app_mode]
+    st.title(f"🚀 {app_mode} Model")
+    if weights_exist[name]:
+        st.info(f"{name} weights already exist. Go to Inference to use the model.")
     else:
-        if st.button("Start Training RNN"):
+        if st.button(f"Start Training {name}"):
             df_bal, _ = split_data(load_raw())
             tok = get_tokenizer(cfg["max_features"])
             X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_rnn(cfg)
-            with st.spinner("Training RNN..."):
+            model = build_fn(cfg)
+            with st.spinner(f"Training {name}..."):
                 h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-                model.save_weights(cfg["rnn_weights"])
-                weights_exist_rnn = True
-            st.success("Simple RNN trained")
+                model.save_weights(wpath)
+                weights_exist[name] = True
+            st.success(f"{name} trained")
             st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
-# Train LSTM
-elif app_mode == "Train LSTM":
-    st.title("🚀 Train LSTM Model")
-    if weights_exist_lstm:
-        st.info("LSTM weights already exist. Go to Inference to use the model.")
-    else:
-        if st.button("Start Training LSTM"):
-            df_bal, _ = split_data(load_raw())
-            tok = get_tokenizer(cfg["max_features"])
-            X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_lstm(cfg)
-            with st.spinner("Training LSTM..."):
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-                model.save_weights(cfg["lstm_weights"])
-                weights_exist_lstm = True
-            st.success("LSTM trained")
-            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
-
-# Train BiLSTM
-elif app_mode == "Train BiLSTM":
-    st.title("🚀 Train BiLSTM Model")
-    if weights_exist_bilstm:
-        st.info("BiLSTM weights already exist. Go to Inference to use the model.")
-    else:
-        if st.button("Start Training BiLSTM"):
-            df_bal, _ = split_data(load_raw())
-            tok = get_tokenizer(cfg["max_features"])
-            X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_bilstm(cfg)
-            with st.spinner("Training BiLSTM..."):
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
-                model.save_weights(cfg["bilstm_weights"])
-                weights_exist_bilstm = True
-            st.success("BiLSTM trained")
-            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
-
-# Inference
+# Inferencia
 elif app_mode == "Inference":
     st.title("📝 Text Classification Inference")
-    st.write("PWD:", os.getcwd())
-    st.write("Archivos en el directorio:", os.listdir("."))
+    st.write("Working dir:", os.getcwd())
+    st.write("Files:", os.listdir("."))
     tok = get_tokenizer(cfg["max_features"])
     models = {}
-    for name, builder, wpath in [
+    for name, build_fn, wpath in [
         ("Simple RNN", build_rnn, cfg["rnn_weights"]),
         ("LSTM", build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
+        ("BiLSTM", build_bilstm, cfg["bilstm_weights"])  
     ]:
-        m = builder(cfg)
-        try:
-            m.load_weights(wpath)
-            models[name] = m
-        except Exception:
+        exists = os.path.exists(wpath)
+        st.write(f"{name} weights exist? {exists}")
+        if exists:
+            try:
+                m = build_fn(cfg)
+                m.load_weights(wpath)
+                models[name] = m
+            except Exception as e:
+                st.error(f"Error loading {name} weights: {e}")
+        else:
             st.error(f"Missing weights for {name}")
+
     for name, m in models.items():
-        txt = st.text_area(f"Enter text for {name}", key=f"txt_{name}")
+        txt = st.text_area(f"Enter text for {name}", key=name)
         if st.button(f"Predict {name}", key=f"btn_{name}") and txt:
             X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
             p = m.predict(X)[0]
-            st.write(f"Class: {np.argmax(p)}, Confidence: {p}")
+            st.write(f"Class: {np.argmax(p)} (conf: {p.max():.3f})")
 
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
@@ -258,7 +236,7 @@ elif app_mode == "Dataset Exploration":
     df_bal, _ = split_data(load_raw())
     dataset_visualization(df_bal)
 
-# Hyperparameter Tuning
+# Tuning
 elif app_mode == "Hyperparameter Tuning":
     st.title("🔧 Hyperparameter Tuning")
     tok = get_tokenizer(cfg["max_features"])
@@ -281,8 +259,7 @@ elif app_mode == "Hyperparameter Tuning":
             study = optuna.load_study(study_name="optuna_study", storage="sqlite:///optuna.db")
             st.write("**Best parameters:**")
             st.json(study.best_params)
-            fig = vis.plot_optimization_history(study)
-            st.plotly_chart(fig)
+            st.plotly_chart(vis.plot_optimization_history(study))
         except:
             st.info("No tuning study found. Click 'Run Tuning' to start.")
 
@@ -290,29 +267,29 @@ elif app_mode == "Hyperparameter Tuning":
 else:
     st.title("🧮 Model Analysis & Justification")
     tok = get_tokenizer(cfg["max_features"])
-    loaded = {}
-    for name, builder, wpath in [
-        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-        ("LSTM", build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
-    ]:
-        model = builder(cfg)
-        try:
-            model.load_weights(wpath)
-            loaded[name] = model
-        except Exception:
-            st.error(f"Missing weights for {name}. Please train first.")
     df_bal, df_val = split_data(load_raw())
     X_val, y_val = prepare(df_val, tok, cfg["maxlen"])
     y_true = np.argmax(y_val, axis=1)
     accuracies = {}
-    for name, model in loaded.items():
+    for name, build_fn, wpath in [
+        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+        ("LSTM", build_lstm, cfg["lstm_weights"]),
+        ("BiLSTM", build_bilstm, cfg["bilstm_weights"])  
+    ]:
+        if not weights_exist[name]:
+            st.error(f"Missing weights for {name}. Please train first.")
+            continue
+        model = build_fn(cfg)
+        try:
+            model.load_weights(wpath)
+        except Exception as e:
+            st.error(f"Error loading {name} weights: {e}")
+            continue
         st.subheader(f"{name} Analysis")
         y_prob = model.predict(X_val)
         y_pred = np.argmax(y_prob, axis=1)
         rep = classification_report(y_true, y_pred, digits=3, output_dict=True)
-        rep_df = pd.DataFrame(rep).transpose()
-        st.dataframe(rep_df)
+        st.dataframe(pd.DataFrame(rep).transpose())
         cm = confusion_matrix(y_true, y_pred)
         fig, ax = plt.subplots()
         sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges")
@@ -330,8 +307,6 @@ else:
             for t in fn.sample(min(3,len(fn)), random_state=42): st.write(f"- {t}")
         else:
             st.write("_None_")
-        st.markdown("**Error Interpretation:**")
-        st.write("Misclassifications may come from noisy text or class imbalance.")
         accuracies[name] = rep["accuracy"]
     if accuracies:
         best = max(accuracies, key=accuracies.get)
