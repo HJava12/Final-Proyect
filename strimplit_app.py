@@ -54,23 +54,21 @@ cfg = {
     "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
 }
 
-# DEBUG: Verifica conexión con los pesos (opcional)
-st.sidebar.write("## Debug Connection")
-if st.sidebar.button("Verificar URLs de modelos"):
-    for name, url in [
-        ("RNN", cfg["rnn_weights"]), 
-        ("LSTM", cfg["lstm_weights"]), 
-        ("BiLSTM", cfg["bilstm_weights"])
-    ]:
-        try:
-            response = requests.head(url)
-            if response.status_code == 200:
-                st.sidebar.success(f"✅ {name}: URL accesible")
-            else:
-                st.sidebar.error(f"❌ {name}: Error HTTP {response.status_code}")
-        except Exception as e:
-            st.sidebar.error(f"❌ {name}: Error de conexión ({str(e)})")
-
+st.sidebar.write("## Debug: Verificación de URLs")
+for name, url in [
+    ("RNN", cfg["rnn_weights"]),
+    ("LSTM", cfg["lstm_weights"]),
+    ("BiLSTM", cfg["bilstm_weights"])
+]:
+    try:
+        response = requests.head(url, allow_redirects=True)
+        st.sidebar.write(f"{name}:")
+        st.sidebar.write(f"- Status: {response.status_code}")
+        st.sidebar.write(f"- URL final: {response.url}")
+        if response.status_code != 200:
+            st.sidebar.error(f"Error: {response.status_code}")
+    except Exception as e:
+        st.sidebar.error(f"Error en {name}: {str(e)}")
 
 @st.cache_data
 def load_raw():
