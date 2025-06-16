@@ -53,31 +53,6 @@ cfg = {
     "bilstm_weights": REPO_URL + "model_weights.weights.h5",
 }
 
-@st.cache_resource
-def download_weights(url):
-    response = requests.get(url)
-    response.raise_for_status()
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
-    temp_file.write(response.content)
-    temp_file.close()
-    return temp_file.name
-
-loaded = {}
-
-for name, builder, wurl in [
-    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-    ("LSTM", build_lstm, cfg["lstm_weights"]),
-    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
-]:
-    model = builder(cfg)
-    try:
-        local_path = download_weights(wurl)
-        model.load_weights(local_path)
-        loaded[name] = model
-        os.unlink(local_path)  # borra el archivo temporal después de cargar
-    except Exception as e:
-        st.error(f"Error loading weights for {name}: {e}")
-
 @st.cache_data
 def load_raw():
     ds = load_dataset("tweets_hate_speech_detection", split="train")
@@ -133,6 +108,31 @@ def build_bilstm(cfg, units=64, dropout=0.2):
     ])
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
+
+@st.cache_resource
+def download_weights(url):
+    response = requests.get(url)
+    response.raise_for_status()
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
+    temp_file.write(response.content)
+    temp_file.close()
+    return temp_file.name
+
+loaded = {}
+
+for name, builder, wurl in [
+    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+    ("LSTM", build_lstm, cfg["lstm_weights"]),
+    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+]:
+    model = builder(cfg)
+    try:
+        local_path = download_weights(wurl)
+        model.load_weights(local_path)
+        loaded[name] = model
+        os.unlink(local_path)  # borra el archivo temporal después de cargar
+    except Exception as e:
+        st.error(f"Error loading weights for {name}: {e}")
 
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
