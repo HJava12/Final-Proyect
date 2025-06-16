@@ -22,6 +22,7 @@ from tensorflow.keras.utils import to_categorical
 import requests
 import tempfile
 import os
+import gdown
 
 # —————————————————————————————————————————————————————
 # Custom CSS styling
@@ -42,15 +43,14 @@ st.markdown(
 tf.random.set_seed(42)
 
 emb_dim = 300
-REPO_URL = "https://drive.google.com/uc?id="
 
 cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": REPO_URL + "1-NeKSzLnwFz8ZpFIYZK7YgJJAp36idJJ",
-    "lstm_weights": REPO_URL + "1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
-    "bilstm_weights": REPO_URL + "1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
+    "rnn_weights": "1-NeKSzLnwFz8ZpFIYZK7YgJJAp36idJJ",
+    "lstm_weights": "1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
+    "bilstm_weights": "1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
 }
 
 @st.cache_data
@@ -109,34 +109,28 @@ def build_bilstm(cfg, units=64, dropout=0.2):
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-def download_weights(url):
-    session = requests.Session()
-    response = session.get(url, stream=True)
-    response.raise_for_status()
-
+@st.cache_resource
+def download_weights(file_id):
+    url = f"https://drive.google.com/uc?id={file_id}"
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
-    for chunk in response.iter_content(chunk_size=32768):
-        if chunk:
-            temp_file.write(chunk)
-    temp_file.close()
+    gdown.download(url, temp_file.name, quiet=False)
     return temp_file.name
 
 loaded = {}
 
-for name, builder, wurl in [
+for name, builder, file_id in [
     ("Simple RNN", build_rnn, cfg["rnn_weights"]),
     ("LSTM", build_lstm, cfg["lstm_weights"]),
     ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
 ]:
     model = builder(cfg)
     try:
-        local_path = download_weights(wurl)
+        local_path = download_weights(file_id)
         model.load_weights(local_path)
         loaded[name] = model
         os.unlink(local_path)
     except Exception as e:
         st.error(f"Error loading weights for {name}: {e}")
-
 
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
