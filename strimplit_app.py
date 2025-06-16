@@ -192,15 +192,24 @@ tokenizer = get_tokenizer(cfg["max_features"])
 # Train Simple RNN
 if app_mode == "Train Simple RNN":
     st.title("🚀 Train the Simple RNN Model")
-    if st.button("Start Training RNN"):
-        df_train_bal, _ = split_data(load_raw())
-        X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
-        model = build_rnn(cfg)
-        with st.spinner("Training Simple RNN..."):
-            history = model.fit(X_train, y_train, validation_split=0.1, epochs=3, batch_size=128)
-            model.save_weights(cfg["rnn_weights"])
-        st.success("Simple RNN trained and saved")
-        st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+    if st.button("Start Training LSTM"):
+        tf.keras.backend.clear_session()
+        model = build_lstm(cfg)
+        try:
+            with st.spinner("Training LSTM..."):
+                history = model.fit(
+                    X_train, y_train,
+                    validation_split=0.1,
+                    epochs=3,
+                    batch_size=64,  # prueba con 64 si 128 consume mucha RAM
+                    verbose=1
+                )
+                model.save_weights(cfg["lstm_weights"])
+            st.success("LSTM trained and saved")
+            st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+        except Exception as e:
+            st.error(f"Training failed: {e}")
+
 
 # Train LSTM
 elif app_mode == "Train LSTM":
