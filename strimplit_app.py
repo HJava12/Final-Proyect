@@ -48,9 +48,9 @@ cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": "https://github.com/HJava12/Final-Proyect/raw/main/rnn_weights.weights.h5",
-    "lstm_weights": "https://github.com/HJava12/Final-Proyect/raw/main/lstm_weights.weights.h5",
-    "bilstm_weights": "https://github.com/HJava12/Final-Proyect/raw/main/model_weights.weights.h5",
+    "rnn_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/rnn_model_weights.weights.h5",
+    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/lstm_model_weights.weights.h5",
+    "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
 }
 
 @st.cache_data
@@ -111,25 +111,31 @@ def build_bilstm(cfg, units=64, dropout=0.2):
 
 @st.cache_resource
 def download_weights(url):
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
-    gdown.download(url, temp_file.name, quiet=False, fuzzy=True)
-    return temp_file.name
-
-loaded = {}
-
-for name, builder, url in [
-    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-    ("LSTM", build_lstm, cfg["lstm_weights"]),
-    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
-]:
-    model = builder(cfg)
     try:
-        local_path = download_weights(url)
-        model.load_weights(local_path)
-        loaded[name] = model
-        os.unlink(local_path)
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        # Usamos un nombre de archivo temporal más descriptivo
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5', prefix='model_weights_')
+        
+        # Barra de progreso para Streamlit
+        progress_bar = st.progress(0)
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        for chunk in response.iter_content(chunk_size=8192):
+            temp_file.write(chunk)
+            downloaded += len(chunk)
+            progress = int((downloaded / total_size) * 100)
+            progress_bar.progress(min(progress, 100))
+        
+        temp_file.close()
+        progress_bar.empty()
+        return temp_file.name
+        
     except Exception as e:
-        st.error(f"Error loading weights for {name}: {e}")
+        st.error(f"Error al descargar los pesos: {str(e)}")
+        return None
 
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
