@@ -35,17 +35,17 @@ st.markdown(
 tf.random.set_seed(42)
 
 # Configuración
-emb_dim = 300
+ebdim = 300
 cfg = {
     "max_features": 10000,
     "maxlen": 300,
-    "emb_dim": emb_dim,
+    "emb_dim": ebdim,
     "rnn_weights":  "rnn_model_weights.weights.h5",
     "lstm_weights": "lstm_model_weights.weights.h5",
     "bilstm_weights": "model_weights.weights.h5"
 }
 
-# Comprueba si los pesos ya existen para evitar reentrenar
+# Verifica existencia de pesos
 weights_exist = all(os.path.exists(cfg[key]) for key in ["rnn_weights", "lstm_weights", "bilstm_weights"])
 
 @st.cache_data
@@ -195,9 +195,9 @@ if app_mode == "Train Simple RNN":
     else:
         if st.button("Start Training RNN"):
             df_bal, _ = split_data(load_raw())
-            tok, M = get_tok_emb(**cfg)
+            tok = get_tokenizer(cfg["max_features"])
             X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_rnn(cfg, M)
+            model = build_rnn(cfg)
             with st.spinner("Training RNN..."):
                 h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
                 model.save_weights(cfg["rnn_weights"])
@@ -212,9 +212,9 @@ elif app_mode == "Train LSTM":
     else:
         if st.button("Start Training LSTM"):
             df_bal, _ = split_data(load_raw())
-            tok, M = get_tok_emb(**cfg)
+            tok = get_tokenizer(cfg["max_features"])
             X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_lstm(cfg, M)
+            model = build_lstm(cfg)
             with st.spinner("Training LSTM..."):
                 h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
                 model.save_weights(cfg["lstm_weights"])
@@ -229,9 +229,9 @@ elif app_mode == "Train BiLSTM":
     else:
         if st.button("Start Training BiLSTM"):
             df_bal, _ = split_data(load_raw())
-            tok, M = get_tok_emb(**cfg)
+            tok = get_tokenizer(cfg["max_features"])
             X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_bilstm(cfg, M)
+            model = build_bilstm(cfg)
             with st.spinner("Training BiLSTM..."):
                 h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
                 model.save_weights(cfg["bilstm_weights"])
@@ -241,16 +241,16 @@ elif app_mode == "Train BiLSTM":
 # Inference
 elif app_mode == "Inference":
     st.title("📝 Text Classification Inference")
-    tok, M = get_tok_emb(**cfg)
+    tok = get_tokenizer(cfg["max_features"])
     models = {}
-    for name, builder, w in [
+    for name, builder, wpath in [
         ("Simple RNN", build_rnn, cfg["rnn_weights"]),
         ("LSTM", build_lstm, cfg["lstm_weights"]),
         ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
     ]:
-        m = builder(cfg, M)
+        m = builder(cfg)
         try:
-            m.load_weights(w)
+            m.load_weights(wpath)
             models[name] = m
         except:
             st.error(f"Missing weights for {name}")
@@ -260,7 +260,7 @@ elif app_mode == "Inference":
             X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
             p = m.predict(X)[0]
             st.write(f"Class: {np.argmax(p)}, Confidence: {p}")
-
+            
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
     st.title("📊 Dataset Exploration")
