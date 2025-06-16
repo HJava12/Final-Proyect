@@ -48,7 +48,7 @@ cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": "1-NeKSzLnwFz8ZpFIYZK7YgJJAp36idJJ",
+    "rnn_weights": "1owTKZuTvEKNvfWclUpc62mu5Q_hJ8Kbi",
     "lstm_weights": "1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
     "bilstm_weights": "1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
 }
