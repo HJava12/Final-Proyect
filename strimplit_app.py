@@ -40,14 +40,43 @@ tf.random.set_seed(42)
 
 # Configuration
 emb_dim = 300
+import requests
+from io import BytesIO
+
+# Añade esto al inicio del código (después de tus imports actuales)
+
+REPO_URL = "https://raw.githubusercontent.com/HJava12/Final-Proyect/main/"
+
+# Modifica tu configuración para usar URLs directas
 cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights":  "rnn_model_weights.weights.h5",
-    "lstm_weights": "lstm_model_weights.weights.h5",
-    "bilstm_weights": "model_weights.weights.h5",
+    "rnn_weights": REPO_URL + "rnn_model_weights.weights.h5",
+    "lstm_weights": REPO_URL + "lstm_model_weights.weights.h5",
+    "bilstm_weights": REPO_URL + "model_weights.weights.h5",
 }
+
+# Agrega esta función para descargar los pesos
+@st.cache_resource
+def load_weights_from_url(url):
+    response = requests.get(url)
+    response.raise_for_status()
+    return BytesIO(response.content)
+
+# Modifica las cargas de pesos para que utilicen la función anterior
+for name, builder, wurl in [
+    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+    ("LSTM", build_lstm, cfg["lstm_weights"]),
+    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+]:
+    model = builder(cfg)
+    try:
+        weight_file = load_weights_from_url(wurl)
+        model.load_weights(weight_file)
+        loaded[name] = model
+    except Exception as e:
+        st.error(f"Error loading weights for {name}: {e}")
 
 @st.cache_data
 def load_raw():
