@@ -50,18 +50,6 @@ cfg = {
     "bilstm_weights": REPO_URL + "model_weights.weights.h5",
 }
 
-
-# Configuration
-emb_dim = 300
-cfg = {
-    "max_features": 10000,
-    "maxlen": 300,
-    "emb_dim": emb_dim,
-    "rnn_weights":  "rnn_model_weights.weights.h5",
-    "lstm_weights": "lstm_model_weights.weights.h5",
-    "bilstm_weights": "model_weights.weights.h5",
-}
-
 @st.cache_data
 def load_raw():
     ds = load_dataset("tweets_hate_speech_detection", split="train")
