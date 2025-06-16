@@ -48,9 +48,9 @@ cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": "https://drive.google.com/file/d/1owTKZuTvEKNvfWclUpc62mu5Q_hJ8Kbi/view?usp=sharing",
-    "lstm_weights": "https://drive.google.com/file/d/1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t/view?usp=sharing",
-    "bilstm_weights": "https://drive.google.com/file/d/1knBcIKITOs47mxtLtCC8hXR4edzxx28g/view?usp=drive_link",
+    "rnn_weights": "https://drive.google.com/uc?id=1owTKZuTvEKNvfWclUpc62mu5Q_hJ8Kbi",
+    "lstm_weights": "https://drive.google.com/uc?id=1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
+    "bilstm_weights": "https://drive.google.com/uc?id=1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
 }
 
 @st.cache_data
