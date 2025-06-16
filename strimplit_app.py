@@ -48,7 +48,7 @@ cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": "1owTKZuTvEKNvfWclUpc62mu5Q_hJ8Kbi",
+    "rnn_weights": "https://drive.google.com/file/d/1owTKZuTvEKNvfWclUpc62mu5Q_hJ8Kbi/view?usp=sharing",
     "lstm_weights": "1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
     "bilstm_weights": "1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
 }
@@ -110,22 +110,21 @@ def build_bilstm(cfg, units=64, dropout=0.2):
     return model
 
 @st.cache_resource
-def download_weights(file_id):
-    url = f"https://drive.google.com/uc?id={file_id}"
+def download_weights(url):
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
-    gdown.download(url, temp_file.name, quiet=False)
+    gdown.download(url, temp_file.name, quiet=False, fuzzy=True)
     return temp_file.name
 
 loaded = {}
 
-for name, builder, file_id in [
+for name, builder, url in [
     ("Simple RNN", build_rnn, cfg["rnn_weights"]),
     ("LSTM", build_lstm, cfg["lstm_weights"]),
     ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
 ]:
     model = builder(cfg)
     try:
-        local_path = download_weights(file_id)
+        local_path = download_weights(url)
         model.load_weights(local_path)
         loaded[name] = model
         os.unlink(local_path)
