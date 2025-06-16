@@ -49,7 +49,7 @@ cfg = {
     "maxlen": 300,
     "emb_dim": emb_dim,
     "rnn_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/rnn_model_weights.weights.h5",
-    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/lstm_model_weights.weights.h5",
+    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5",
     "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
 }
 
