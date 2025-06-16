@@ -42,15 +42,15 @@ st.markdown(
 tf.random.set_seed(42)
 
 emb_dim = 300
-REPO_URL = "https://raw.githubusercontent.com/HJava12/Final-Proyect/main/"
+REPO_URL = "https://drive.google.com/uc?id="
 
 cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": REPO_URL + "rnn_model_weights.weights.h5",
-    "lstm_weights": REPO_URL + "lstm_model_weights.weights.h5",
-    "bilstm_weights": REPO_URL + "model_weights.weights.h5",
+    "rnn_weights": REPO_URL + "1-NeKSzLnwFz8ZpFIYZK7YgJJAp36idJJ",
+    "lstm_weights": REPO_URL + "1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
+    "bilstm_weights": REPO_URL + "1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
 }
 
 @st.cache_data
