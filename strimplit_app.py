@@ -48,9 +48,9 @@ cfg = {
     "max_features": 10000,
     "maxlen": 300,
     "emb_dim": emb_dim,
-    "rnn_weights": "https://drive.google.com/uc?id=1owTKZuTvEKNvfWclUpc62mu5Q_hJ8Kbi",
-    "lstm_weights": "https://drive.google.com/uc?id=1Ij5J90SCvcrSgnpGeTfe9WOcwOoiMv6t",
-    "bilstm_weights": "https://drive.google.com/uc?id=1knBcIKITOs47mxtLtCC8hXR4edzxx28g",
+    "rnn_weights": "https://github.com/HJava12/Final-Proyect/raw/main/rnn_weights.weights.h5",
+    "lstm_weights": "https://github.com/HJava12/Final-Proyect/raw/main/lstm_weights.weights.h5",
+    "bilstm_weights": "https://github.com/HJava12/Final-Proyect/raw/main/model_weights.weights.h5",
 }
 
 @st.cache_data
