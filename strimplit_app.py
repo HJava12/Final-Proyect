@@ -42,6 +42,17 @@ st.markdown(
 # For reproducibility
 tf.random.set_seed(42)
 
+emb_dim = 300
+
+cfg = {
+    "max_features": 10000,
+    "maxlen": 300,
+    "emb_dim": emb_dim,
+    "rnn_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/rnn_model_weights.weights.h5",
+    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/lstm_model_weights.weights.h5",
+    "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
+}
+
 # DEBUG: Verifica conexión con los pesos (opcional)
 st.sidebar.write("## Debug Connection")
 if st.sidebar.button("Verificar URLs de modelos"):
@@ -59,16 +70,6 @@ if st.sidebar.button("Verificar URLs de modelos"):
         except Exception as e:
             st.sidebar.error(f"❌ {name}: Error de conexión ({str(e)})")
 
-emb_dim = 300
-
-cfg = {
-    "max_features": 10000,
-    "maxlen": 300,
-    "emb_dim": emb_dim,
-    "rnn_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/rnn_model_weights.weights.h5",
-    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/lstm_model_weights.weights.h5",
-    "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
-}
 
 @st.cache_data
 def load_raw():
