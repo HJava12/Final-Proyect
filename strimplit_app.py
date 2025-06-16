@@ -182,27 +182,30 @@ if app_mode.startswith("Train"):
         "Train LSTM": (build_lstm, cfg["lstm_weights"], "LSTM"),
         "Train BiLSTM": (build_bilstm, cfg["bilstm_weights"], "BiLSTM")
     }
+
     build_fn, wpath, name = model_map[app_mode]
     st.title(f"🚀 {app_mode} Model")
-    if weights_exist[name]:
+
+    if weights_exist.get(name, False):
         st.info(f"{name} weights already exist. Go to Inference to use the model.")
     else:
         if st.button(f"Start Training {name}"):
-            df_bal, _ = split_data(load_raw())
-            tok = get_tokenizer(cfg["max_features"])
-            X, y = prepare(df_bal, tok, cfg["maxlen"])
-            model = build_fn(cfg)
-            with st.spinner(f"Training {name}..."):
-                try:
+            try:
+                df_bal, _ = split_data(load_raw())
+                tok = get_tokenizer(cfg["max_features"])
+                X, y = prepare(df_bal, tok, cfg["maxlen"])
+                model = build_fn(cfg)
+
+                with st.spinner(f"Training {name}..."):
                     h = model.fit(X, y, validation_split=0.1, epochs=1, batch_size=32)
                     model.save_weights(wpath)
                     weights_exist[name] = True
-                except Exception as e:
-                    st.error(f"Training failed for {name}: {e}")
-                    return
 
-            st.success(f"{name} trained")
-            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+                st.success(f"{name} trained")
+                st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
+            except Exception as e:
+                st.error(f"Training failed for {name}: {e}")
+
 
 # Inferencia
 elif app_mode == "Inference":
