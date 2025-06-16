@@ -112,6 +112,7 @@ def load_raw():
     return ds.to_pandas()
 
 @st.cache_resource
+@st.cache_resource
 def get_tok_emb(max_features, maxlen, emb_dim, glove_path, **kwargs):
     df_train, _ = split_data(load_raw())
     tok = Tokenizer(num_words=max_features, oov_token="<OOV>")
@@ -137,6 +138,7 @@ def get_tok_emb(max_features, maxlen, emb_dim, glove_path, **kwargs):
         if i < max_features and w in emb_index:
             M[i] = emb_index[w]
     return tok, M
+
 
 def split_data(df):
     df_train, df_val = train_test_split(
