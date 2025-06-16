@@ -95,6 +95,12 @@ st.markdown(
 # Set random seed
 tf.random.set_seed(42)
 
+@st.cache_data
+def ensure_file(path, file_id):
+    if not os.path.exists(path):
+        download_file_from_google_drive(file_id, path)
+    return path
+
 # Configuration
 cfg = {
     "max_features": 10000,
