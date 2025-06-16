@@ -45,96 +45,73 @@ tf.random.set_seed(42)
 
 emb_dim = 300
 
+# --- Configuración inicial ---
 cfg = {
     "max_features": 10000,
     "maxlen": 300,
-    "emb_dim": emb_dim,
+    "emb_dim": 300,
     "rnn_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/rnn_model_weights.weights.h5",
-    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5",
+    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/lstm_model_weights.weights.h5",
     "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
 }
 
-st.sidebar.write("## Debug: Verificación de URLs")
-for name, url in [
-    ("RNN", cfg["rnn_weights"]),
-    ("LSTM", cfg["lstm_weights"]),
-    ("BiLSTM", cfg["bilstm_weights"])
-]:
+# --- Funciones para descargar pesos ---
+def download_weights(url, model_name):
     try:
-        response = requests.head(url, allow_redirects=True)
-        st.sidebar.write(f"{name}:")
-        st.sidebar.write(f"- Status: {response.status_code}")
-        st.sidebar.write(f"- URL final: {response.url}")
-        if response.status_code != 200:
-            st.sidebar.error(f"Error: {response.status_code}")
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".h5")
+        urllib.request.urlretrieve(url, temp_file.name)
+        st.success(f"✅ Pesos de {model_name} descargados correctamente")
+        return temp_file.name
     except Exception as e:
-        st.sidebar.error(f"Error en {name}: {str(e)}")
+        st.error(f"❌ Error al descargar {model_name}: {str(e)}")
+        return None
 
-@st.cache_data
-def load_raw():
-    ds = load_dataset("tweets_hate_speech_detection", split="train")
-    return ds.to_pandas()
+# --- Funciones para construir modelos ---
+def build_rnn(config):
+    model = Sequential([
+        Embedding(config["max_features"], config["emb_dim"], input_length=config["maxlen"]),
+        SimpleRNN(64, return_sequences=False),
+        Dense(2, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
 
-@st.cache_data
-def get_tokenizer(max_features):
-    df_train, _ = split_data(load_raw())
-    tok = Tokenizer(num_words=max_features, oov_token="<OOV>")
-    tok.fit_on_texts(df_train.tweet.astype(str))
-    return tok
+def build_lstm(config):
+    model = Sequential([
+        Embedding(config["max_features"], config["emb_dim"], input_length=config["maxlen"]),
+        LSTM(64, return_sequences=False),
+        Dense(2, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
 
-def split_data(df):
-    df_train, df_val = train_test_split(
-        df, test_size=0.2, stratify=df.label, random_state=42
-    )
-    maj = df_train[df_train.label == 0]
-    min_ = df_train[df_train.label == 1]
-    min_up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
-    df_bal = pd.concat([maj, min_up]).sample(frac=1, random_state=42)
-    return df_bal, df_val
+def build_bilstm(config):
+    model = Sequential([
+        Embedding(config["max_features"], config["emb_dim"], input_length=config["maxlen"]),
+        Bidirectional(LSTM(64, return_sequences=False)),
+        Dense(2, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
 
-# Model builders without pre-trained embeddings
-
-def download_weights(url, output_path):
-    try:
-        # Usar wget (Linux/macOS)
-        subprocess.run(["wget", "-O", output_path, url], check=True)
-        return True
-    except subprocess.CalledProcessError:
-        try:
-            # Si falla wget, intentar con curl
-            subprocess.run(["curl", "-L", url, "-o", output_path], check=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            st.error(f"Error al descargar: {e}")
-            return False
-
-df_train_bal, _ = split_data(load_raw())
-X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
-
-# Carga inicial de modelos
-loaded = {}
+# --- Carga de modelos ---
+loaded_models = {}
 
 for name, builder, url in [
     ("Simple RNN", build_rnn, cfg["rnn_weights"]),
     ("LSTM", build_lstm, cfg["lstm_weights"]),
-    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+    ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
 ]:
     try:
         with st.spinner(f"Cargando modelo {name}..."):
-            weights_path = download_weights(url)
-            
-            if weights_path and os.path.exists(weights_path):
+            weights_path = download_weights(url, name)
+            if weights_path:
                 model = builder(cfg)
                 model.load_weights(weights_path)
-                loaded[name] = model
-                st.success(f"✅ {name} cargado correctamente")
-                os.unlink(weights_path)
-            else:
-                st.error(f"❌ No se encontraron pesos para {name}")
-                
+                loaded_models[name] = model
+                os.unlink(weights_path)  # Eliminar archivo temporal
     except Exception as e:
-        st.error(f"Error crítico al cargar {name}: {str(e)}")
-
+        st.error(f"Error al cargar {name}: {str(e)}")
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
     seqs = tokenizer.texts_to_sequences(df.tweet.astype(str))
