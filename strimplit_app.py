@@ -228,6 +228,9 @@ elif app_mode == "Train BiLSTM":
             st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
 # Inference
+st.write("PWD:", os.getcwd())
+st.write("Archivos en el directorio:", os.listdir("."))
+
 elif app_mode == "Inference":
     st.title("📝 Text Classification Inference")
     tok = get_tokenizer(cfg["max_features"])
