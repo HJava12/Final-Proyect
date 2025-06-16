@@ -42,7 +42,7 @@ st.markdown(
 tf.random.set_seed(42)
 
 emb_dim = 300
-REPO_URL = "https://githubusercontent.com/HJava12/Final-Proyect/main/"
+REPO_URL = "https://raw.githubusercontent.com/HJava12/Final-Proyect/main/"
 
 cfg = {
     "max_features": 10000,
