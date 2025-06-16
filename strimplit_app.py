@@ -95,12 +95,6 @@ st.markdown(
 # Set random seed
 tf.random.set_seed(42)
 
-@st.cache_data
-def ensure_file(path, file_id):
-    if not os.path.exists(path):
-        download_file_from_google_drive(file_id, path)
-    return path
-
 # Configuration
 cfg = {
     "max_features": 10000,
@@ -111,13 +105,6 @@ cfg = {
     "lstm_weights": "lstm_model_weights.weights.h5",
     "rnn_weights":  "rnn_model_weights.weights.h5"
 }
-
-cfg["rnn_weights"]    = ensure_file("rnn_model_weights.weights.h5",
-                                    "1Of9Vlsd3HxujlsKp5fFE_qpNXQVoDppY")
-cfg["lstm_weights"]   = ensure_file("lstm_model_weights.weights.h5",
-                                    "1KQxzoSNb6bGTNlLY_AkpebsIkBmZhvh5")
-cfg["bilstm_weights"] = ensure_file("model_weights.weights.h5",
-                                    "1xKWEgJDtbdCnYjuSMWXykT9N5sb0249g")
 
 @st.cache_data
 def load_raw():
@@ -150,7 +137,6 @@ def get_tok_emb(max_features, maxlen, emb_dim, glove_path, **kwargs):
         if i < max_features and w in emb_index:
             M[i] = emb_index[w]
     return tok, M
-
 
 def split_data(df):
     df_train, df_val = train_test_split(
