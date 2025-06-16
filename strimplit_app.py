@@ -19,6 +19,9 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Embedding, Bidirectional, LSTM, SimpleRNN, Dense
 from tensorflow.keras.utils import to_categorical
+import requests
+import tempfile
+import os
 
 # —————————————————————————————————————————————————————
 # Custom CSS styling
@@ -49,6 +52,31 @@ cfg = {
     "lstm_weights": REPO_URL + "lstm_model_weights.weights.h5",
     "bilstm_weights": REPO_URL + "model_weights.weights.h5",
 }
+
+@st.cache_resource
+def download_weights(url):
+    response = requests.get(url)
+    response.raise_for_status()
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
+    temp_file.write(response.content)
+    temp_file.close()
+    return temp_file.name
+
+loaded = {}
+
+for name, builder, wurl in [
+    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+    ("LSTM", build_lstm, cfg["lstm_weights"]),
+    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+]:
+    model = builder(cfg)
+    try:
+        local_path = download_weights(wurl)
+        model.load_weights(local_path)
+        loaded[name] = model
+        os.unlink(local_path)  # borra el archivo temporal después de cargar
+    except Exception as e:
+        st.error(f"Error loading weights for {name}: {e}")
 
 @st.cache_data
 def load_raw():
