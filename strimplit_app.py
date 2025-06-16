@@ -77,38 +77,33 @@ def split_data(df):
 
 # Model builders without pre-trained embeddings
 
-def build_rnn(cfg, units=64, dropout=0.2):
-    model = Sequential([
-        Input(shape=(cfg["maxlen"],)),
-        Embedding(cfg["max_features"], cfg["emb_dim"]),
-        SimpleRNN(units, dropout=dropout, recurrent_dropout=dropout),
-        Dense(2, activation="softmax")
-    ])
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
+# Carga inicial de modelos (al inicio, después de definir cfg)
+loaded = {}
 
-
-def build_lstm(cfg, units=64, dropout=0.2):
-    model = Sequential([
-        Input(shape=(cfg["maxlen"],)),
-        Embedding(cfg["max_features"], cfg["emb_dim"]),
-        LSTM(units, dropout=dropout, recurrent_dropout=dropout),
-        Dense(2, activation="softmax")
-    ])
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
-
-
-def build_bilstm(cfg, units=64, dropout=0.2):
-    model = Sequential([
-        Input(shape=(cfg["maxlen"],)),
-        Embedding(cfg["max_features"], cfg["emb_dim"]),
-        Bidirectional(LSTM(units, dropout=dropout, recurrent_dropout=dropout)),
-        Dense(2, activation="softmax")
-    ])
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return model
-
+for name, builder, url in [
+    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+    ("LSTM", build_lstm, cfg["lstm_weights"]),
+    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+]:
+    try:
+        with st.spinner(f"Cargando modelo {name}..."):
+            # 1. Descargar pesos
+            weights_path = download_weights(url)
+            
+            if weights_path and os.path.exists(weights_path):
+                # 2. Construir modelo
+                model = builder(cfg)
+                # 3. Cargar pesos
+                model.load_weights(weights_path)
+                loaded[name] = model
+                st.success(f"✅ {name} cargado correctamente")
+                # 4. Limpiar archivo temporal
+                os.unlink(weights_path)
+            else:
+                st.error(f"❌ No se encontraron pesos para {name}")
+                
+    except Exception as e:
+        st.error(f"Error crítico al cargar {name}: {str(e)}")
 @st.cache_resource
 def download_weights(url):
     try:
@@ -272,26 +267,19 @@ elif app_mode == "Train BiLSTM":
 # Inference
 elif app_mode == "Inference":
     st.title("📝 Text Classification Inference")
-    models = {}
-    for name, builder, wpath in [
-        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-        ("LSTM", build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
-    ]:
-        m = builder(cfg)
-        try:
-            m.load_weights(wpath)
-            models[name] = m
-        except:
-            st.error(f"Missing weights for {name}. Please train first.")
-    for name, model in models.items():
-        st.subheader(f"{name} Model")
-        txt = st.text_area(f"Enter text for {name}:", key=name)
-        if st.button(f"Predict with {name}", key=f"btn_{name}") and txt:
-            X = pad_sequences(tokenizer.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
-            probs = model.predict(X)[0]
-            st.write(f"Class: {np.argmax(probs)}, Confidence: {probs}")
-
+    
+    if not loaded:  # Si no hay modelos cargados
+        st.error("No se pudieron cargar los modelos. Verifica las URLs de los pesos.")
+    else:
+        for name, model in loaded.items():
+            st.subheader(f"{name} Model")
+            txt = st.text_area(f"Enter text for {name}:", key=name)
+            if st.button(f"Predict with {name}", key=f"btn_{name}") and txt:
+                X = pad_sequences(tokenizer.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
+                probs = model.predict(X, verbose=0)[0]
+                st.write(f"Class: {np.argmax(probs)}")
+                st.write(f"Confidence: {np.max(probs):.2%}")
+                st.progress(float(np.max(probs)))
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
     st.title("📊 In-depth Dataset Exploration")
@@ -331,23 +319,17 @@ elif app_mode == "Hyperparameter Tuning":
 # Model Analysis & Justification
 else:
     st.title("🧮 Model Analysis & Justification")
-    loaded = {}
-    for name, builder, wpath in [
-        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-        ("LSTM", build_lstm, cfg["lstm_weights"]),
-        ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
-    ]:
-        m = builder(cfg)
-        try:
-            m.load_weights(wpath)
-            loaded[name] = m
-        except:
-            st.error(f"Missing weights for {name}. Please train first.")
-    df_bal, df_val = split_data(load_raw())
-    X_val, y_val = prepare(df_val, tokenizer, cfg["maxlen"])
-    y_true = np.argmax(y_val, axis=1)
-    accuracies = {}
-    for name, model in loaded.items():
+    
+    if not loaded:
+        st.error("No hay modelos disponibles para análisis")
+    else:
+        df_bal, df_val = split_data(load_raw())
+        X_val, y_val = prepare(df_val, tokenizer, cfg["maxlen"])
+        y_true = np.argmax(y_val, axis=1)
+        
+        accuracies = {}
+        for name, model in loaded.items():
+            # ... (mantén el resto del código igual)
         st.subheader(f"{name} Analysis")
         y_prob = model.predict(X_val)
         y_pred = np.argmax(y_prob, axis=1)
