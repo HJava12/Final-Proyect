@@ -112,43 +112,22 @@ def prepare(df, tokenizer, maxlen, num_classes=2):
 def dataset_visualization(df_bal):
     df = df_bal.copy()
     df['length'] = df.tweet.str.split().str.len()
-
-    st.subheader("1. Class Distribution")
-    fig, ax = plt.subplots()
-    df.label.value_counts().plot.bar(ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("2. Tweet Length Distribution")
-    fig, ax = plt.subplots()
-    sns.histplot(df['length'], bins=50, kde=True, ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("3. Length by Class Boxplot")
-    fig, ax = plt.subplots()
-    sns.boxplot(x='label', y='length', data=df, ax=ax)
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
-    st.subheader("4. Top 20 Most Common Words")
-    words = df.tweet.str.cat(sep=' ').split()
-    freq = pd.Series(words).value_counts().head(20)
-    fig, ax = plt.subplots()
-    freq.plot.barh(ax=ax)
-    ax.invert_yaxis()
-    fig.patch.set_facecolor('#3d3e36')
-    ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='white')
-    st.pyplot(fig)
-
+    for title, plot_fn in [
+        ("1. Class Distribution", lambda df: df.label.value_counts().plot.bar()),
+        ("2. Tweet Length Distribution", lambda df: sns.histplot(df['length'], bins=50, kde=True)),
+        ("3. Length by Class Boxplot", lambda df: sns.boxplot(x='label', y='length', data=df)),
+        ("4. Top 20 Most Common Words", lambda df: pd.Series(df.tweet.str.cat(sep=' ').split()).value_counts().head(20).plot.barh()),
+    ]:
+        st.subheader(title)
+        fig, ax = plt.subplots()
+        plot_fn(df)
+        fig.patch.set_facecolor('#3d3e36')
+        ax.set_facecolor('#3d3e36')
+        ax.tick_params(colors='white')
+        st.pyplot(fig)
+    # Word cloud
     st.subheader("5. Word Cloud")
+    words = df.tweet.str.cat(sep=' ').split()
     wc = WordCloud(width=800, height=400, background_color='white').generate(' '.join(words))
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.imshow(wc, interpolation='bilinear')
@@ -156,12 +135,11 @@ def dataset_visualization(df_bal):
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
     st.pyplot(fig)
-
+    # Bigrams
     st.subheader("6. Top 15 Bigrams")
     from collections import Counter
     bigrams = list(zip(words, words[1:]))
-    bigram_freq = Counter(bigrams).most_common(15)
-    labels, counts = zip(*bigram_freq)
+    labels, counts = zip(*Counter(bigrams).most_common(15))
     labels = [' '.join(b) for b in labels]
     fig, ax = plt.subplots()
     pd.Series(counts, index=labels).plot.bar(ax=ax)
@@ -169,10 +147,10 @@ def dataset_visualization(df_bal):
     ax.set_facecolor('#3d3e36')
     ax.tick_params(colors='white')
     st.pyplot(fig)
-
+    # Sample tweets
     st.subheader("7. Sample Tweets by Length Quartile")
     for q in [0.25, 0.5, 0.75]:
-        tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).values[0]
+        tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).iat[0]
         st.write(f"- Quartile {int(q*100)}%: {tweet}")
 
 # Navegación
@@ -252,7 +230,7 @@ elif app_mode == "Inference":
         try:
             m.load_weights(wpath)
             models[name] = m
-        except:
+        except Exception:
             st.error(f"Missing weights for {name}")
     for name, m in models.items():
         txt = st.text_area(f"Enter text for {name}", key=f"txt_{name}")
@@ -260,31 +238,29 @@ elif app_mode == "Inference":
             X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
             p = m.predict(X)[0]
             st.write(f"Class: {np.argmax(p)}, Confidence: {p}")
-            
+
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
     st.title("📊 Dataset Exploration")
     df_bal, _ = split_data(load_raw())
     dataset_visualization(df_bal)
 
-# Tuning
+# Hyperparameter Tuning
 elif app_mode == "Hyperparameter Tuning":
     st.title("🔧 Hyperparameter Tuning")
-    tok, M = get_tok_emb(**cfg)
+    tok = get_tokenizer(cfg["max_features"])
     if st.button("Run Tuning"):
         study = optuna.create_study(direction="maximize")
-        @st.spinner("Tuning...")
-        def obj(trial):
+        def objective(trial):
             u = trial.suggest_int("units", 32, 128)
             d = trial.suggest_float("dropout", 0.1, 0.5)
-            mdl = build_bilstm(cfg, M, units=u, dropout=d)
+            mdl = build_bilstm(cfg, units=u, dropout=d)
             df_bal, _ = split_data(load_raw())
             X, y = prepare(df_bal, tok, cfg["maxlen"])
             h = mdl.fit(X, y, validation_split=0.1, epochs=3, batch_size=128, verbose=0)
             return h.history["val_accuracy"][-1]
+        with st.spinner("Tuning..."):
             study.optimize(objective, n_trials=5)
-            return study
-        study = run()
         st.success("Tuning completed")
         st.json(study.best_params)
     else:
@@ -300,21 +276,21 @@ elif app_mode == "Hyperparameter Tuning":
 # Model Analysis & Justification
 else:
     st.title("🧮 Model Analysis & Justification")
-    tokenizer, M = get_tok_emb(**cfg)
+    tok = get_tokenizer(cfg["max_features"])
     loaded = {}
     for name, builder, wpath in [
         ("Simple RNN", build_rnn, cfg["rnn_weights"]),
         ("LSTM", build_lstm, cfg["lstm_weights"]),
         ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
     ]:
-        model = builder(cfg, M)
+        model = builder(cfg)
         try:
             model.load_weights(wpath)
             loaded[name] = model
-        except:
+        except Exception:
             st.error(f"Missing weights for {name}. Please train first.")
     df_bal, df_val = split_data(load_raw())
-    X_val, y_val = prepare(df_val, tokenizer, cfg["maxlen"])
+    X_val, y_val = prepare(df_val, tok, cfg["maxlen"])
     y_true = np.argmax(y_val, axis=1)
     accuracies = {}
     for name, model in loaded.items():
@@ -331,23 +307,18 @@ else:
         df_val["pred"] = y_pred
         st.markdown("**False Positives:**")
         fp = df_val[(df_val.label==0)&(df_val.pred==1)].tweet
-        if len(fp)>0:
+        if not fp.empty:
             for t in fp.sample(min(3,len(fp)), random_state=42): st.write(f"- {t}")
         else:
             st.write("_None_")
         st.markdown("**False Negatives:**")
         fn = df_val[(df_val.label==1)&(df_val.pred==0)].tweet
-        if len(fn)>0:
+        if not fn.empty:
             for t in fn.sample(min(3,len(fn)), random_state=42): st.write(f"- {t}")
         else:
             st.write("_None_")
         st.markdown("**Error Interpretation:**")
-        st.write("Misclassifications may come from noisy text, limited embedding coverage, or class imbalance.")
-        st.markdown("**Suggestions for Improvement:**")
-        st.write("- Increase data for minority class.")
-        st.write("- Enhance text cleaning and preprocessing.")
-        st.write("- Try contextual embeddings (e.g., BERT).")
-        st.write("- Tune model architecture and hyperparameters.")
+        st.write("Misclassifications may come from noisy text or class imbalance.")
         accuracies[name] = rep["accuracy"]
     if accuracies:
         best = max(accuracies, key=accuracies.get)
