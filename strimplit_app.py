@@ -106,6 +106,13 @@ cfg = {
     "rnn_weights":  "rnn_model_weights.weights.h5"
 }
 
+cfg["rnn_weights"]    = ensure_file("rnn_model_weights.weights.h5",
+                                    "1Of9Vlsd3HxujlsKp5fFE_qpNXQVoDppY")
+cfg["lstm_weights"]   = ensure_file("lstm_model_weights.weights.h5",
+                                    "1KQxzoSNb6bGTNlLY_AkpebsIkBmZhvh5")
+cfg["bilstm_weights"] = ensure_file("model_weights.weights.h5",
+                                    "1xKWEgJDtbdCnYjuSMWXykT9N5sb0249g")
+
 @st.cache_data
 def load_raw():
     ds = load_dataset("tweets_hate_speech_detection", split="train")
