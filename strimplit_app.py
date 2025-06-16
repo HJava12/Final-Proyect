@@ -23,6 +23,7 @@ import requests
 import tempfile
 import os
 import gdown
+import subprocess
 
 # —————————————————————————————————————————————————————
 # Custom CSS styling
@@ -95,31 +96,19 @@ def split_data(df):
 
 # Model builders without pre-trained embeddings
 
-@st.cache_resource
-def download_weights(url):
+def download_weights(url, output_path):
     try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5', prefix='model_weights_')
-        
-        progress_bar = st.progress(0)
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
-        
-        for chunk in response.iter_content(chunk_size=8192):
-            temp_file.write(chunk)
-            downloaded += len(chunk)
-            progress = int((downloaded / total_size) * 100)
-            progress_bar.progress(min(progress, 100))
-        
-        temp_file.close()
-        progress_bar.empty()
-        return temp_file.name
-        
-    except Exception as e:
-        st.error(f"Error al descargar los pesos: {str(e)}")
-        return None
+        # Usar wget (Linux/macOS)
+        subprocess.run(["wget", "-O", output_path, url], check=True)
+        return True
+    except subprocess.CalledProcessError:
+        try:
+            # Si falla wget, intentar con curl
+            subprocess.run(["curl", "-L", url, "-o", output_path], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error al descargar: {e}")
+            return False
 
 df_train_bal, _ = split_data(load_raw())
 X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
