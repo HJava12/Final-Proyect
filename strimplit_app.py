@@ -193,7 +193,11 @@ if app_mode.startswith("Train"):
             X, y = prepare(df_bal, tok, cfg["maxlen"])
             model = build_fn(cfg)
             with st.spinner(f"Training {name}..."):
-                h = model.fit(X, y, validation_split=0.1, epochs=1, batch_size=32)
+                try:
+                    h = model.fit( X, y, validation_split=0.1, epochs=1, batch_size=32 )
+                except Exception as e:
+                    st.error(f"Training failed for {name}: {e}")
+                    return
                 model.save_weights(wpath)
                 weights_exist[name] = True
             st.success(f"{name} trained")
