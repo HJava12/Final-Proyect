@@ -94,43 +94,14 @@ def split_data(df):
 
 # Model builders without pre-trained embeddings
 
-# Carga inicial de modelos (al inicio, después de definir cfg)
-loaded = {}
-
-for name, builder, url in [
-    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-    ("LSTM", build_lstm, cfg["lstm_weights"]),
-    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
-]:
-    try:
-        with st.spinner(f"Cargando modelo {name}..."):
-            # 1. Descargar pesos
-            weights_path = download_weights(url)
-            
-            if weights_path and os.path.exists(weights_path):
-                # 2. Construir modelo
-                model = builder(cfg)
-                # 3. Cargar pesos
-                model.load_weights(weights_path)
-                loaded[name] = model
-                st.success(f"✅ {name} cargado correctamente")
-                # 4. Limpiar archivo temporal
-                os.unlink(weights_path)
-            else:
-                st.error(f"❌ No se encontraron pesos para {name}")
-                
-    except Exception as e:
-        st.error(f"Error crítico al cargar {name}: {str(e)}")
 @st.cache_resource
 def download_weights(url):
     try:
         response = requests.get(url, stream=True)
         response.raise_for_status()
         
-        # Usamos un nombre de archivo temporal más descriptivo
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5', prefix='model_weights_')
         
-        # Barra de progreso para Streamlit
         progress_bar = st.progress(0)
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
@@ -148,6 +119,30 @@ def download_weights(url):
     except Exception as e:
         st.error(f"Error al descargar los pesos: {str(e)}")
         return None
+
+# Carga inicial de modelos
+loaded = {}
+
+for name, builder, url in [
+    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+    ("LSTM", build_lstm, cfg["lstm_weights"]),
+    ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+]:
+    try:
+        with st.spinner(f"Cargando modelo {name}..."):
+            weights_path = download_weights(url)
+            
+            if weights_path and os.path.exists(weights_path):
+                model = builder(cfg)
+                model.load_weights(weights_path)
+                loaded[name] = model
+                st.success(f"✅ {name} cargado correctamente")
+                os.unlink(weights_path)
+            else:
+                st.error(f"❌ No se encontraron pesos para {name}")
+                
+    except Exception as e:
+        st.error(f"Error crítico al cargar {name}: {str(e)}")
 
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
@@ -346,41 +341,48 @@ else:
         
         accuracies = {}
         for name, model in loaded.items():
-            # ... (mantén el resto del código igual)
-        st.subheader(f"{name} Analysis")
-        y_prob = model.predict(X_val)
-        y_pred = np.argmax(y_prob, axis=1)
-        rep = classification_report(y_true, y_pred, digits=3, output_dict=True)
-        rep_df = pd.DataFrame(rep).transpose()
-        st.dataframe(rep_df)
-        cm = confusion_matrix(y_true, y_pred)
-        fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges")
-        st.pyplot(fig)
-        df_val["pred"] = y_pred
-        st.markdown("**False Positives:**")
-        fp = df_val[(df_val.label==0)&(df_val.pred==1)].tweet
-        if len(fp)>0:
-            for t in fp.sample(min(3,len(fp)), random_state=42): st.write(f"- {t}")
+            st.subheader(f"{name} Analysis")
+            y_prob = model.predict(X_val)
+            y_pred = np.argmax(y_prob, axis=1)
+            rep = classification_report(y_true, y_pred, digits=3, output_dict=True)
+            rep_df = pd.DataFrame(rep).transpose()
+            st.dataframe(rep_df)
+            
+            cm = confusion_matrix(y_true, y_pred)
+            fig, ax = plt.subplots()
+            sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges")
+            st.pyplot(fig)
+            
+            df_val["pred"] = y_pred
+            st.markdown("**False Positives:**")
+            fp = df_val[(df_val.label==0)&(df_val.pred==1)].tweet
+            if len(fp)>0:
+                for t in fp.sample(min(3,len(fp)), random_state=42): 
+                    st.write(f"- {t}")
+            else:
+                st.write("_None_")
+                
+            st.markdown("**False Negatives:**")
+            fn = df_val[(df_val.label==1)&(df_val.pred==0)].tweet
+            if len(fn)>0:
+                for t in fn.sample(min(3,len(fn)), random_state=42): 
+                    st.write(f"- {t}")
+            else:
+                st.write("_None_")
+                
+            st.markdown("**Error Interpretation:**")
+            st.write("Misclassifications may come from noisy text, limited embedding coverage, or class imbalance.")
+            st.markdown("**Suggestions for Improvement:**")
+            st.write("- Increase data for minority class.")
+            st.write("- Enhance text cleaning and preprocessing.")
+            st.write("- Try contextual embeddings (e.g., BERT).")
+            st.write("- Tune model architecture and hyperparameters.")
+            
+            accuracies[name] = rep["accuracy"]
+        
+        if accuracies:
+            best = max(accuracies, key=accuracies.get)
+            st.subheader(f"🏆 Best Model: {best} ({accuracies[best]:.3f})")
+            st.write("Chosen for highest validation accuracy.")
         else:
-            st.write("_None_")
-        st.markdown("**False Negatives:**")
-        fn = df_val[(df_val.label==1)&(df_val.pred==0)].tweet
-        if len(fn)>0:
-            for t in fn.sample(min(3,len(fn)), random_state=42): st.write(f"- {t}")
-        else:
-            st.write("_None_")
-        st.markdown("**Error Interpretation:**")
-        st.write("Misclassifications may come from noisy text, limited embedding coverage, or class imbalance.")
-        st.markdown("**Suggestions for Improvement:**")
-        st.write("- Increase data for minority class.")
-        st.write("- Enhance text cleaning and preprocessing.")
-        st.write("- Try contextual embeddings (e.g., BERT).")
-        st.write("- Tune model architecture and hyperparameters.")
-        accuracies[name] = rep["accuracy"]
-    if accuracies:
-        best = max(accuracies, key=accuracies.get)
-        st.subheader(f"🏆 Best Model: {best} ({accuracies[best]:.3f})")
-        st.write("Chosen for highest validation accuracy.")
-    else:
-        st.error("No model performances available.")
+            st.error("No model performances available.")
