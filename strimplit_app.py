@@ -122,17 +122,62 @@ def dataset_visualization(df_bal):
     df.label.value_counts().plot.bar(ax=ax)
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    axes_color = '#5d612e'
-    ax.spines['bottom'].set_color(axes_color)
-    ax.spines['left'].set_color(axes_color)
-    ax.tick_params(axis='x', colors=axes_color)
-    ax.tick_params(axis='y', colors=axes_color)
-    ax.set_xlabel('Class', color='white')
-    ax.set_ylabel('Count', color='white')
-    for spine in ax.spines.values(): spine.set_color('white')
+    ax.tick_params(colors='white')
     st.pyplot(fig)
 
-    # ... (remainder of visualizations unchanged) ...
+    st.subheader("2. Tweet Length Distribution")
+    fig, ax = plt.subplots()
+    sns.histplot(df['length'], bins=50, kde=True, ax=ax)
+    fig.patch.set_facecolor('#3d3e36')
+    ax.set_facecolor('#3d3e36')
+    ax.tick_params(colors='white')
+    st.pyplot(fig)
+
+    st.subheader("3. Length by Class Boxplot")
+    fig, ax = plt.subplots()
+    sns.boxplot(x='label', y='length', data=df, ax=ax)
+    fig.patch.set_facecolor('#3d3e36')
+    ax.set_facecolor('#3d3e36')
+    ax.tick_params(colors='white')
+    st.pyplot(fig)
+
+    st.subheader("4. Top 20 Most Common Words")
+    words = df.tweet.str.cat(sep=' ').split()
+    freq = pd.Series(words).value_counts().head(20)
+    fig, ax = plt.subplots()
+    freq.plot.barh(ax=ax)
+    ax.invert_yaxis()
+    fig.patch.set_facecolor('#3d3e36')
+    ax.set_facecolor('#3d3e36')
+    ax.tick_params(colors='white')
+    st.pyplot(fig)
+
+    st.subheader("5. Word Cloud")
+    wc = WordCloud(width=800, height=400, background_color='white').generate(' '.join(words))
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.imshow(wc, interpolation='bilinear')
+    ax.axis('off')
+    fig.patch.set_facecolor('#3d3e36')
+    ax.set_facecolor('#3d3e36')
+    st.pyplot(fig)
+
+    st.subheader("6. Top 15 Bigrams")
+    from collections import Counter
+    bigrams = list(zip(words, words[1:]))
+    bigram_freq = Counter(bigrams).most_common(15)
+    labels, counts = zip(*bigram_freq)
+    labels = [' '.join(b) for b in labels]
+    fig, ax = plt.subplots()
+    pd.Series(counts, index=labels).plot.bar(ax=ax)
+    fig.patch.set_facecolor('#3d3e36')
+    ax.set_facecolor('#3d3e36')
+    ax.tick_params(colors='black')
+    st.pyplot(fig)
+
+    st.subheader("7. Sample Tweets by Length Quartile")
+    for q in [0.25, 0.5, 0.75]:
+        tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).values[0]
+        st.write(f"- Quartile {int(q*100)}%: {tweet}")
 
 # Sidebar & Navigation
 st.sidebar.title("Navigation")
