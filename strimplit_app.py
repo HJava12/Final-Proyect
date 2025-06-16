@@ -4,9 +4,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 import seaborn as sns
-from cycler import cycler
 import optuna
 import optuna.visualization as vis
 from wordcloud import WordCloud
@@ -19,20 +17,13 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Embedding, Bidirectional, LSTM, SimpleRNN, Dense
 from tensorflow.keras.utils import to_categorical
-import requests
-import tempfile
-import os
-import gdown
-import subprocess
 
-# —————————————————————————————————————————————————————
-# Custom CSS styling
-# —————————————————————————————————————————————————————
+# --- Estilos CSS ---
 st.markdown(
     """
     <style>
     .stApp { background-color: #000702; }
-    [data-testid="stSidebar"] > div:first-child { background-color: #1f2c13; }
+    [data-testid=\"stSidebar\"] > div:first-child { background-color: #1f2c13; }
     .css-1v0mbdj, .css-1d391kg { color: #d4903b !important; }
     button { background-color: #a94802 !important; color: #ffffff !important; }
     </style>
@@ -40,78 +31,76 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# For reproducibility
+# Semilla aleatoria
 tf.random.set_seed(42)
 
+# Configuración
 emb_dim = 300
-
-# --- Configuración inicial ---
 cfg = {
     "max_features": 10000,
     "maxlen": 300,
-    "emb_dim": 300,
-    "rnn_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/rnn_model_weights.weights.h5",
-    "lstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/lstm_model_weights.weights.h5",
-    "bilstm_weights": "https://github.com/HJava12/Final-Proyect/releases/download/Models/model_weights.weights.h5"
+    "emb_dim": emb_dim,
+    "rnn_weights":  "rnn_model_weights.weights.h5",
+    "lstm_weights": "lstm_model_weights.weights.h5",
+    "bilstm_weights": "model_weights.weights.h5"
 }
 
-# --- Funciones para descargar pesos ---
-def download_weights(url, model_name):
-    try:
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".h5")
-        urllib.request.urlretrieve(url, temp_file.name)
-        st.success(f"✅ Pesos de {model_name} descargados correctamente")
-        return temp_file.name
-    except Exception as e:
-        st.error(f"❌ Error al descargar {model_name}: {str(e)}")
-        return None
+# Comprueba si los pesos ya existen para evitar reentrenar
+weights_exist = all(os.path.exists(cfg[key]) for key in ["rnn_weights", "lstm_weights", "bilstm_weights"])
 
-# --- Funciones para construir modelos ---
-def build_rnn(config):
+@st.cache_data
+def load_raw():
+    ds = load_dataset("tweets_hate_speech_detection", split="train")
+    return ds.to_pandas()
+
+@st.cache_resource
+def get_tokenizer(max_features):
+    df_train, _ = split_data(load_raw())
+    tok = Tokenizer(num_words=max_features, oov_token="<OOV>")
+    tok.fit_on_texts(df_train.tweet.astype(str))
+    return tok
+
+
+def split_data(df):
+    df_train, df_val = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
+    maj = df_train[df_train.label == 0]
+    min_ = df_train[df_train.label == 1]
+    min_up = resample(min_, replace=True, n_samples=len(maj), random_state=42)
+    return pd.concat([maj, min_up]).sample(frac=1, random_state=42), df_val
+
+
+def build_rnn(cfg, units=64, dropout=0.2):
     model = Sequential([
-        Embedding(config["max_features"], config["emb_dim"], input_length=config["maxlen"]),
-        SimpleRNN(64, return_sequences=False),
-        Dense(2, activation='softmax')
+        Input(shape=(cfg["maxlen"],)),
+        Embedding(cfg["max_features"], cfg["emb_dim"], trainable=True),
+        SimpleRNN(units, dropout=dropout, recurrent_dropout=dropout),
+        Dense(2, activation="softmax")
     ])
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-def build_lstm(config):
+
+def build_lstm(cfg, units=64, dropout=0.2):
     model = Sequential([
-        Embedding(config["max_features"], config["emb_dim"], input_length=config["maxlen"]),
-        LSTM(64, return_sequences=False),
-        Dense(2, activation='softmax')
+        Input(shape=(cfg["maxlen"],)),
+        Embedding(cfg["max_features"], cfg["emb_dim"], trainable=True),
+        LSTM(units, dropout=dropout, recurrent_dropout=dropout),
+        Dense(2, activation="softmax")
     ])
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-def build_bilstm(config):
+
+def build_bilstm(cfg, units=64, dropout=0.2):
     model = Sequential([
-        Embedding(config["max_features"], config["emb_dim"], input_length=config["maxlen"]),
-        Bidirectional(LSTM(64, return_sequences=False)),
-        Dense(2, activation='softmax')
+        Input(shape=(cfg["maxlen"],)),
+        Embedding(cfg["max_features"], cfg["emb_dim"], trainable=True),
+        Bidirectional(LSTM(units, dropout=dropout, recurrent_dropout=dropout)),
+        Dense(2, activation="softmax")
     ])
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-# --- Carga de modelos ---
-loaded_models = {}
-
-for name, builder, url in [
-    ("Simple RNN", build_rnn, cfg["rnn_weights"]),
-    ("LSTM", build_lstm, cfg["lstm_weights"]),
-    ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
-]:
-    try:
-        with st.spinner(f"Cargando modelo {name}..."):
-            weights_path = download_weights(url, name)
-            if weights_path:
-                model = builder(cfg)
-                model.load_weights(weights_path)
-                loaded_models[name] = model
-                os.unlink(weights_path)  # Eliminar archivo temporal
-    except Exception as e:
-        st.error(f"Error al cargar {name}: {str(e)}")
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
     seqs = tokenizer.texts_to_sequences(df.tweet.astype(str))
@@ -119,7 +108,7 @@ def prepare(df, tokenizer, maxlen, num_classes=2):
     y = to_categorical(df.label.values, num_classes=num_classes)
     return X, y
 
-# Visualization helper stays the same
+
 def dataset_visualization(df_bal):
     df = df_bal.copy()
     df['length'] = df.tweet.str.split().str.len()
@@ -178,7 +167,7 @@ def dataset_visualization(df_bal):
     pd.Series(counts, index=labels).plot.bar(ax=ax)
     fig.patch.set_facecolor('#3d3e36')
     ax.set_facecolor('#3d3e36')
-    ax.tick_params(colors='black')
+    ax.tick_params(colors='white')
     st.pyplot(fig)
 
     st.subheader("7. Sample Tweets by Length Quartile")
@@ -186,101 +175,113 @@ def dataset_visualization(df_bal):
         tweet = df[df['length'] <= df['length'].quantile(q)].tweet.sample(1).values[0]
         st.write(f"- Quartile {int(q*100)}%: {tweet}")
 
-# Sidebar & Navigation
+# Navegación
 st.sidebar.title("Navigation")
 app_mode = st.sidebar.radio("Go to", [
-    "Train Simple RNN", "Train LSTM", "Train BiLSTM",
-    "Inference", "Dataset Exploration",
-    "Hyperparameter Tuning", "Model Analysis & Justification"
+    "Train Simple RNN",
+    "Train LSTM",
+    "Train BiLSTM",
+    "Inference",
+    "Dataset Exploration",
+    "Hyperparameter Tuning",
+    "Model Analysis & Justification"
 ])
-
-tokenizer = get_tokenizer(cfg["max_features"])
 
 # Train Simple RNN
 if app_mode == "Train Simple RNN":
-    st.title("🚀 Train the Simple RNN Model")
-    if st.button("Start Training LSTM"):
-        tf.keras.backend.clear_session()
-        model = build_lstm(cfg)
-        try:
-            with st.spinner("Training LSTM..."):
-                history = model.fit(
-                    X_train, y_train,
-                    validation_split=0.1,
-                    epochs=3,
-                    batch_size=64,  # prueba con 64 si 128 consume mucha RAM
-                    verbose=1
-                )
-                model.save_weights(cfg["lstm_weights"])
-            st.success("LSTM trained and saved")
-            st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
-        except Exception as e:
-            st.error(f"Training failed: {e}")
-
+    st.title("🚀 Train Simple RNN Model")
+    if weights_exist:
+        st.info("Weights already exist. Go to Inference to use the model.")
+    else:
+        if st.button("Start Training RNN"):
+            df_bal, _ = split_data(load_raw())
+            tok, M = get_tok_emb(**cfg)
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            model = build_rnn(cfg, M)
+            with st.spinner("Training RNN..."):
+                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
+                model.save_weights(cfg["rnn_weights"])
+            st.success("Simple RNN trained")
+            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
 # Train LSTM
 elif app_mode == "Train LSTM":
-    st.title("🚀 Train the LSTM Model")
-    if st.button("Start Training LSTM"):
-        df_train_bal, _ = split_data(load_raw())
-        X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
-        model = build_lstm(cfg)
-        with st.spinner("Training LSTM..."):
-            history = model.fit(X_train, y_train, validation_split=0.1, epochs=3, batch_size=128)
-            model.save_weights(cfg["lstm_weights"])
-        st.success("LSTM trained and saved")
-        st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+    st.title("🚀 Train LSTM Model")
+    if weights_exist:
+        st.info("Weights already exist. Go to Inference to use the model.")
+    else:
+        if st.button("Start Training LSTM"):
+            df_bal, _ = split_data(load_raw())
+            tok, M = get_tok_emb(**cfg)
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            model = build_lstm(cfg, M)
+            with st.spinner("Training LSTM..."):
+                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
+                model.save_weights(cfg["lstm_weights"])
+            st.success("LSTM trained")
+            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
 # Train BiLSTM
 elif app_mode == "Train BiLSTM":
-    st.title("🚀 Train the BiLSTM Model")
-    if st.button("Start Training BiLSTM"):
-        df_train_bal, _ = split_data(load_raw())
-        X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
-        model = build_bilstm(cfg)
-        with st.spinner("Training BiLSTM..."):
-            history = model.fit(X_train, y_train, validation_split=0.1, epochs=3, batch_size=128)
-            model.save_weights(cfg["bilstm_weights"])
-        st.success("BiLSTM trained and saved")
-        st.write(f"Accuracy: {history.history['accuracy'][-1]:.3f}")
+    st.title("🚀 Train BiLSTM Model")
+    if weights_exist:
+        st.info("Weights already exist. Go to Inference to use the model.")
+    else:
+        if st.button("Start Training BiLSTM"):
+            df_bal, _ = split_data(load_raw())
+            tok, M = get_tok_emb(**cfg)
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            model = build_bilstm(cfg, M)
+            with st.spinner("Training BiLSTM..."):
+                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128)
+                model.save_weights(cfg["bilstm_weights"])
+            st.success("BiLSTM trained")
+            st.write(f"Accuracy: {h.history['accuracy'][-1]:.3f}")
 
 # Inference
 elif app_mode == "Inference":
     st.title("📝 Text Classification Inference")
-    
-    if not loaded:  # Si no hay modelos cargados
-        st.error("No se pudieron cargar los modelos. Verifica las URLs de los pesos.")
-    else:
-        for name, model in loaded.items():
-            st.subheader(f"{name} Model")
-            txt = st.text_area(f"Enter text for {name}:", key=name)
-            if st.button(f"Predict with {name}", key=f"btn_{name}") and txt:
-                X = pad_sequences(tokenizer.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
-                probs = model.predict(X, verbose=0)[0]
-                st.write(f"Class: {np.argmax(probs)}")
-                st.write(f"Confidence: {np.max(probs):.2%}")
-                st.progress(float(np.max(probs)))
+    tok, M = get_tok_emb(**cfg)
+    models = {}
+    for name, builder, w in [
+        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+        ("LSTM", build_lstm, cfg["lstm_weights"]),
+        ("BiLSTM", build_bilstm, cfg["bilstm_weights"])
+    ]:
+        m = builder(cfg, M)
+        try:
+            m.load_weights(w)
+            models[name] = m
+        except:
+            st.error(f"Missing weights for {name}")
+    for name, m in models.items():
+        txt = st.text_area(f"Enter text for {name}", key=f"txt_{name}")
+        if st.button(f"Predict {name}", key=f"btn_{name}") and txt:
+            X = pad_sequences(tok.texts_to_sequences([txt]), maxlen=cfg["maxlen"])
+            p = m.predict(X)[0]
+            st.write(f"Class: {np.argmax(p)}, Confidence: {p}")
+
 # Dataset Exploration
 elif app_mode == "Dataset Exploration":
-    st.title("📊 In-depth Dataset Exploration")
+    st.title("📊 Dataset Exploration")
     df_bal, _ = split_data(load_raw())
     dataset_visualization(df_bal)
 
-# Hyperparameter Tuning
+# Tuning
 elif app_mode == "Hyperparameter Tuning":
-    st.title("🔧 Hyperparameter Tuning (BiLSTM Only)")
+    st.title("🔧 Hyperparameter Tuning")
+    tok, M = get_tok_emb(**cfg)
     if st.button("Run Tuning"):
-        study = optuna.create_study(direction="maximize", storage="sqlite:///optuna.db", load_if_exists=True)
-        @st.spinner("Tuning in progress...")
-        def run():
-            def objective(trial):
-                u = trial.suggest_int("lstm_units", 32, 128)
-                d = trial.suggest_float("dropout_rate", 0.1, 0.5)
-                model = build_bilstm(cfg, units=u, dropout=d)
-                df_bal, _ = split_data(load_raw())
-                X, y = prepare(df_bal, tokenizer, cfg["maxlen"])
-                h = model.fit(X, y, validation_split=0.1, epochs=3, batch_size=128, verbose=0)
-                return h.history["val_accuracy"][ -1 ]
+        study = optuna.create_study(direction="maximize")
+        @st.spinner("Tuning...")
+        def obj(trial):
+            u = trial.suggest_int("units", 32, 128)
+            d = trial.suggest_float("dropout", 0.1, 0.5)
+            mdl = build_bilstm(cfg, M, units=u, dropout=d)
+            df_bal, _ = split_data(load_raw())
+            X, y = prepare(df_bal, tok, cfg["maxlen"])
+            h = mdl.fit(X, y, validation_split=0.1, epochs=3, batch_size=128, verbose=0)
+            return h.history["val_accuracy"][-1]
             study.optimize(objective, n_trials=5)
             return study
         study = run()
@@ -299,58 +300,58 @@ elif app_mode == "Hyperparameter Tuning":
 # Model Analysis & Justification
 else:
     st.title("🧮 Model Analysis & Justification")
-    
-    if not loaded:
-        st.error("No hay modelos disponibles para análisis")
-    else:
-        df_bal, df_val = split_data(load_raw())
-        X_val, y_val = prepare(df_val, tokenizer, cfg["maxlen"])
-        y_true = np.argmax(y_val, axis=1)
-        
-        accuracies = {}
-        for name, model in loaded.items():
-            st.subheader(f"{name} Analysis")
-            y_prob = model.predict(X_val)
-            y_pred = np.argmax(y_prob, axis=1)
-            rep = classification_report(y_true, y_pred, digits=3, output_dict=True)
-            rep_df = pd.DataFrame(rep).transpose()
-            st.dataframe(rep_df)
-            
-            cm = confusion_matrix(y_true, y_pred)
-            fig, ax = plt.subplots()
-            sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges")
-            st.pyplot(fig)
-            
-            df_val["pred"] = y_pred
-            st.markdown("**False Positives:**")
-            fp = df_val[(df_val.label==0)&(df_val.pred==1)].tweet
-            if len(fp)>0:
-                for t in fp.sample(min(3,len(fp)), random_state=42): 
-                    st.write(f"- {t}")
-            else:
-                st.write("_None_")
-                
-            st.markdown("**False Negatives:**")
-            fn = df_val[(df_val.label==1)&(df_val.pred==0)].tweet
-            if len(fn)>0:
-                for t in fn.sample(min(3,len(fn)), random_state=42): 
-                    st.write(f"- {t}")
-            else:
-                st.write("_None_")
-                
-            st.markdown("**Error Interpretation:**")
-            st.write("Misclassifications may come from noisy text, limited embedding coverage, or class imbalance.")
-            st.markdown("**Suggestions for Improvement:**")
-            st.write("- Increase data for minority class.")
-            st.write("- Enhance text cleaning and preprocessing.")
-            st.write("- Try contextual embeddings (e.g., BERT).")
-            st.write("- Tune model architecture and hyperparameters.")
-            
-            accuracies[name] = rep["accuracy"]
-        
-        if accuracies:
-            best = max(accuracies, key=accuracies.get)
-            st.subheader(f"🏆 Best Model: {best} ({accuracies[best]:.3f})")
-            st.write("Chosen for highest validation accuracy.")
+    tokenizer, M = get_tok_emb(**cfg)
+    loaded = {}
+    for name, builder, wpath in [
+        ("Simple RNN", build_rnn, cfg["rnn_weights"]),
+        ("LSTM", build_lstm, cfg["lstm_weights"]),
+        ("BiLSTM", build_bilstm, cfg["bilstm_weights"]),
+    ]:
+        model = builder(cfg, M)
+        try:
+            model.load_weights(wpath)
+            loaded[name] = model
+        except:
+            st.error(f"Missing weights for {name}. Please train first.")
+    df_bal, df_val = split_data(load_raw())
+    X_val, y_val = prepare(df_val, tokenizer, cfg["maxlen"])
+    y_true = np.argmax(y_val, axis=1)
+    accuracies = {}
+    for name, model in loaded.items():
+        st.subheader(f"{name} Analysis")
+        y_prob = model.predict(X_val)
+        y_pred = np.argmax(y_prob, axis=1)
+        rep = classification_report(y_true, y_pred, digits=3, output_dict=True)
+        rep_df = pd.DataFrame(rep).transpose()
+        st.dataframe(rep_df)
+        cm = confusion_matrix(y_true, y_pred)
+        fig, ax = plt.subplots()
+        sns.heatmap(cm, annot=True, fmt="d", ax=ax, cmap="Oranges")
+        st.pyplot(fig)
+        df_val["pred"] = y_pred
+        st.markdown("**False Positives:**")
+        fp = df_val[(df_val.label==0)&(df_val.pred==1)].tweet
+        if len(fp)>0:
+            for t in fp.sample(min(3,len(fp)), random_state=42): st.write(f"- {t}")
         else:
-            st.error("No model performances available.")
+            st.write("_None_")
+        st.markdown("**False Negatives:**")
+        fn = df_val[(df_val.label==1)&(df_val.pred==0)].tweet
+        if len(fn)>0:
+            for t in fn.sample(min(3,len(fn)), random_state=42): st.write(f"- {t}")
+        else:
+            st.write("_None_")
+        st.markdown("**Error Interpretation:**")
+        st.write("Misclassifications may come from noisy text, limited embedding coverage, or class imbalance.")
+        st.markdown("**Suggestions for Improvement:**")
+        st.write("- Increase data for minority class.")
+        st.write("- Enhance text cleaning and preprocessing.")
+        st.write("- Try contextual embeddings (e.g., BERT).")
+        st.write("- Tune model architecture and hyperparameters.")
+        accuracies[name] = rep["accuracy"]
+    if accuracies:
+        best = max(accuracies, key=accuracies.get)
+        st.subheader(f"🏆 Best Model: {best} ({accuracies[best]:.3f})")
+        st.write("Chosen for highest validation accuracy.")
+    else:
+        st.error("No model performances available.")
