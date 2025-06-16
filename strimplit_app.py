@@ -109,12 +109,15 @@ def build_bilstm(cfg, units=64, dropout=0.2):
     model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
     return model
 
-@st.cache_resource
 def download_weights(url):
-    response = requests.get(url)
+    session = requests.Session()
+    response = session.get(url, stream=True)
     response.raise_for_status()
+
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.h5')
-    temp_file.write(response.content)
+    for chunk in response.iter_content(chunk_size=32768):
+        if chunk:
+            temp_file.write(chunk)
     temp_file.close()
     return temp_file.name
 
@@ -130,9 +133,10 @@ for name, builder, wurl in [
         local_path = download_weights(wurl)
         model.load_weights(local_path)
         loaded[name] = model
-        os.unlink(local_path)  # borra el archivo temporal después de cargar
+        os.unlink(local_path)
     except Exception as e:
         st.error(f"Error loading weights for {name}: {e}")
+
 
 
 def prepare(df, tokenizer, maxlen, num_classes=2):
