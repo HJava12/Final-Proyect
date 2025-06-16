@@ -121,6 +121,9 @@ def download_weights(url):
         st.error(f"Error al descargar los pesos: {str(e)}")
         return None
 
+df_train_bal, _ = split_data(load_raw())
+X_train, y_train = prepare(df_train_bal, tokenizer, cfg["maxlen"])
+
 # Carga inicial de modelos
 loaded = {}
 
